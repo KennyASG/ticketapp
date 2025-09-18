@@ -24,7 +24,7 @@ async function loginUser({ email, password }) {
 }
 
 async function listUsers() {
-  return await User.findAll({ attributes: ["id", "name", "email", "role", "createdAt"] });
+  return await User.findAll({ attributes: ["id", "name", "email", "role", "created_at"] });
 }
 
 module.exports = { registerUser, loginUser, listUsers };
