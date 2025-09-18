@@ -1,17 +1,290 @@
+-- 0) Extensiones útiles
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";         -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";        -- uuid_generate_v4() (opcional)
+
+-- 1) Seguridad / Usuarios de aplicación
 CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name VARCHAR(100) NOT NULL,
-    email VARCHAR(150) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    role VARCHAR(20) NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin')),
-    created_at TIMESTAMP DEFAULT NOW(),
-    updated_at TIMESTAMP DEFAULT NOW()
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         VARCHAR(100) NOT NULL,
+    email        VARCHAR(150) NOT NULL UNIQUE,
+    password     VARCHAR(255) NOT NULL,
+    created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-INSERT INTO users (name, email, password, role)
-VALUES 
-  ('Admin', 'admin@example.com', 'admin123', 'admin'),
-  ('Juan Pérez', 'juan@example.com', 'user123', 'user'),
-  ('María López', 'maria@example.com', 'user456', 'user');
+CREATE TABLE roles (
+    id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    code       VARCHAR(50) UNIQUE NOT NULL,   -- 'admin', 'user', 'ops', etc.
+    name       VARCHAR(100) NOT NULL
+);
 
-SELECT * FROM Users;
+CREATE TABLE user_roles (
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+);
+
+-- 2) Catálogo: venues / sectores / asientos
+CREATE TABLE venues (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name         VARCHAR(150) NOT NULL,
+    address      VARCHAR(250),
+    city         VARCHAR(120),
+    country      VARCHAR(120),
+    created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Sectores (pueden ser de capacidad general "GA" o numerados con asientos)
+CREATE TABLE venue_sectors (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    venue_id     UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+    name         VARCHAR(100) NOT NULL,           -- "Platea A", "General", etc.
+    is_ga        BOOLEAN NOT NULL DEFAULT TRUE,   -- TRUE: capacidad por cupos; FALSE: asientos individualizados
+    capacity     INTEGER CHECK (capacity IS NULL OR capacity >= 0),
+    created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (venue_id, name)
+);
+
+-- Asientos fijos del venue/sector (solo se usan si is_ga = FALSE)
+CREATE TABLE seats (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    venue_id     UUID NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+    sector_id    UUID NOT NULL REFERENCES venue_sectors(id) ON DELETE CASCADE,
+    row_label    VARCHAR(20),                 -- opcional
+    seat_number  VARCHAR(20),                 -- opcional
+    label        VARCHAR(40),                 -- etiqueta visible (p.ej. "A-12")
+    created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (sector_id, row_label, seat_number)
+);
+
+-- 3) Eventos y precios
+CREATE TABLE events (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    venue_id      UUID NOT NULL REFERENCES venues(id) ON DELETE RESTRICT,
+    name          VARCHAR(200) NOT NULL,
+    description   TEXT,
+    starts_at     TIMESTAMP NOT NULL,
+    ends_at       TIMESTAMP,
+    status        VARCHAR(20) NOT NULL DEFAULT 'scheduled' CHECK (status IN ('scheduled','on_sale','sold_out','completed','canceled')),
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Sectores del evento: permite activar solo algunos sectores del venue y asignar cupo (en GA) o usar asientos
+CREATE TABLE event_sectors (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id      UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    sector_id     UUID NOT NULL REFERENCES venue_sectors(id) ON DELETE RESTRICT,
+    -- Para GA: capacidad publicada para el evento (si NULL, usa capacity del sector)
+    capacity_override INTEGER CHECK (capacity_override IS NULL OR capacity_override >= 0),
+    -- Para bloquear temporalmente ventas de un sector:
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (event_id, sector_id)
+);
+
+-- Precios por evento/sector (puede haber varias "tarifas" por sector)
+CREATE TABLE event_prices (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id      UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    sector_id     UUID NOT NULL REFERENCES venue_sectors(id) ON DELETE RESTRICT,
+    name          VARCHAR(80) NOT NULL,              -- "General", "Early Bird", etc.
+    currency      VARCHAR(3) NOT NULL DEFAULT 'USD', -- ISO 4217
+    price_cents   INTEGER NOT NULL CHECK (price_cents >= 0),
+    fee_cents     INTEGER NOT NULL DEFAULT 0 CHECK (fee_cents >= 0),
+    is_active     BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (event_id, sector_id, name)
+);
+
+-- 4) Inventario lógico por asiento o por cupo (derivable, pero dejamos tabla de "estado" para búsquedas rápidas)
+-- Para GA: no habrá rows en event_seats; se controla con contadores/holds.
+-- Para numerados: se proyecta cada asiento del venue en el evento.
+CREATE TABLE event_seats (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id      UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    seat_id       UUID NOT NULL REFERENCES seats(id) ON DELETE RESTRICT,
+    status        VARCHAR(20) NOT NULL DEFAULT 'available' CHECK (status IN ('available','held','sold','blocked')),
+    -- si está vendido/held, por trazabilidad:
+    last_order_id UUID,
+    last_reservation_id UUID,
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (event_id, seat_id)
+);
+
+CREATE INDEX idx_event_seats_event_status ON event_seats (event_id, status);
+
+-- 5) Reservas temporales (holds) con TTL y sus ítems
+CREATE TABLE reservations (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+    event_id      UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    status        VARCHAR(20) NOT NULL DEFAULT 'held' CHECK (status IN ('held','expired','confirmed','canceled')),
+    expires_at    TIMESTAMP NOT NULL,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Item de reserva: puede apuntar a seat_id (numerado) o a sector GA con cantidad
+CREATE TABLE reservation_items (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reservation_id   UUID NOT NULL REFERENCES reservations(id) ON DELETE CASCADE,
+    -- Numerado:
+    event_seat_id    UUID REFERENCES event_seats(id) ON DELETE RESTRICT,
+    -- GA:
+    event_sector_id  UUID REFERENCES event_sectors(id) ON DELETE RESTRICT,
+    quantity         INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    price_id         UUID REFERENCES event_prices(id) ON DELETE SET NULL, -- tarifa usada en el hold
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    -- exactamente uno de {event_seat_id, event_sector_id} debe estar presente
+    CHECK (
+        (event_seat_id IS NOT NULL AND event_sector_id IS NULL AND quantity = 1)
+        OR
+        (event_seat_id IS NULL AND event_sector_id IS NOT NULL)
+    )
+);
+
+-- Evitar doble hold del mismo asiento (numerado)
+CREATE UNIQUE INDEX uq_reservation_item_unique_seat
+ON reservation_items (event_seat_id)
+WHERE event_seat_id IS NOT NULL;
+
+-- 6) Lista de espera (waitlist) por evento
+CREATE TABLE waitlist (
+    id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    event_id     UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    user_id      UUID REFERENCES users(id) ON DELETE SET NULL,
+    requested_qty INTEGER NOT NULL CHECK (requested_qty > 0),
+    status       VARCHAR(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','invited','fulfilled','canceled','expired')),
+    position     INTEGER, -- puede calcularse o persistir para rapidez
+    created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at   TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_waitlist_event_status ON waitlist (event_id, status, created_at);
+
+-- 7) Órdenes y pagos
+CREATE TABLE orders (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+    reservation_id UUID REFERENCES reservations(id) ON DELETE SET NULL,
+    event_id      UUID NOT NULL REFERENCES events(id) ON DELETE RESTRICT,
+    status        VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','authorized','confirmed','canceled','failed')),
+    currency      VARCHAR(3) NOT NULL DEFAULT 'USD',
+    total_cents   INTEGER NOT NULL DEFAULT 0 CHECK (total_cents >= 0),
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE order_items (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id      UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    -- Numerado:
+    event_seat_id UUID REFERENCES event_seats(id) ON DELETE RESTRICT,
+    -- GA:
+    event_sector_id UUID REFERENCES event_sectors(id) ON DELETE RESTRICT,
+    quantity      INTEGER NOT NULL DEFAULT 1 CHECK (quantity > 0),
+    price_cents   INTEGER NOT NULL CHECK (price_cents >= 0),
+    fee_cents     INTEGER NOT NULL DEFAULT 0 CHECK (fee_cents >= 0),
+    price_name    VARCHAR(80),
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (
+        (event_seat_id IS NOT NULL AND event_sector_id IS NULL AND quantity = 1)
+        OR
+        (event_seat_id IS NULL AND event_sector_id IS NOT NULL)
+    )
+);
+
+-- Tickets emitidos (para entregar QR/PNR)
+CREATE TABLE tickets (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id      UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    event_id      UUID NOT NULL REFERENCES events(id) ON DELETE RESTRICT,
+    event_seat_id UUID REFERENCES event_seats(id) ON DELETE SET NULL, -- NULL si GA
+    event_sector_id UUID REFERENCES event_sectors(id) ON DELETE SET NULL,
+    status        VARCHAR(20) NOT NULL DEFAULT 'issued' CHECK (status IN ('issued','redeemed','canceled')),
+    code          VARCHAR(80) UNIQUE NOT NULL, -- QR/PNR
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- Pagos
+CREATE TABLE payments (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id      UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    provider      VARCHAR(50) NOT NULL,        -- "stripe","adyen","mock"
+    provider_ref  VARCHAR(120),                -- id del pago en el PSP
+    amount_cents  INTEGER NOT NULL CHECK (amount_cents >= 0),
+    currency      VARCHAR(3) NOT NULL DEFAULT 'USD',
+    status        VARCHAR(20) NOT NULL DEFAULT 'created' CHECK (status IN ('created','authorized','captured','failed','canceled','refunded','partially_refunded')),
+    raw_response  JSONB,                       -- almacena payload del PSP
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_payments_order ON payments(order_id);
+CREATE INDEX idx_payments_status ON payments(status);
+
+-- 8) Notificaciones (email / sms / webhook)
+CREATE TABLE notifications (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       UUID REFERENCES users(id) ON DELETE SET NULL,
+    order_id      UUID REFERENCES orders(id) ON DELETE SET NULL,
+    channel       VARCHAR(20) NOT NULL CHECK (channel IN ('email','sms','webhook','inapp')),
+    template_code VARCHAR(80) NOT NULL,   -- p.ej. ORDER_CONFIRMED
+    payload       JSONB,
+    status        VARCHAR(20) NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','sent','failed')),
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- 9) Idempotencia para POST sensibles (p.ej., /orders)
+CREATE TABLE idempotency_keys (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    scope            VARCHAR(50) NOT NULL,     -- "create_order", "pay_order", etc.
+    idempotency_key  VARCHAR(120) NOT NULL,
+    user_id          UUID REFERENCES users(id) ON DELETE SET NULL,
+    request_hash     VARCHAR(64),              -- opcional: hash del body
+    response_code    INTEGER,                  -- último status http
+    response_body    JSONB,                    -- última respuesta
+    created_at       TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (scope, idempotency_key)
+);
+
+-- 10) Outbox para integración/eventos de dominio (para bus de mensajes)
+CREATE TABLE outbox_events (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    topic         VARCHAR(120) NOT NULL,    -- "reservation.created", "order.confirmed", etc.
+    payload       JSONB NOT NULL,
+    tries         INTEGER NOT NULL DEFAULT 0,
+    sent          BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW(),
+    sent_at       TIMESTAMP
+);
+CREATE INDEX idx_outbox_unsent ON outbox_events (sent, created_at);
+
+-- 11) Auditoría genérica
+CREATE TABLE audit_log (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+    action        VARCHAR(80) NOT NULL,      -- "LOGIN","CREATE_ORDER","EXPIRE_RESERVATION", etc.
+    entity_type   VARCHAR(80),               -- "order","reservation","ticket", etc.
+    entity_id     UUID,
+    metadata      JSONB,
+    created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- 12) Índices recomendados adicionales
+CREATE INDEX idx_events_venue ON events(venue_id, starts_at);
+CREATE INDEX idx_event_sectors_event ON event_sectors(event_id);
+CREATE INDEX idx_reservations_event_status ON reservations(event_id, status, expires_at);
+CREATE INDEX idx_orders_user ON orders(user_id, created_at);
+CREATE INDEX idx_tickets_event ON tickets(event_id, status);
+
+-- 13) Triggers (sugerencia básica): mantener updated_at
+-- (puedes reemplazar por triggers de prisma/sequelize o por ON UPDATE desde app)
