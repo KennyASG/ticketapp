@@ -226,3 +226,70 @@ CREATE TABLE notifications (
     FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
     FOREIGN KEY (status_id) REFERENCES status_generales(id)
 );
+
+
+
+
+
+
+
+-- ============================
+-- Estados para CONCERTS
+-- ============================
+INSERT INTO status_generales (dominio, descripcion, activo) VALUES
+('concert', 'scheduled', TRUE),
+('concert', 'on_sale', TRUE),
+('concert', 'sold_out', TRUE),
+('concert', 'completed', TRUE),
+('concert', 'canceled', TRUE);
+
+-- ============================
+-- Estados para ORDERS
+-- ============================
+INSERT INTO status_generales (dominio, descripcion, activo) VALUES
+('order', 'pending', TRUE),
+('order', 'confirmed', TRUE),
+('order', 'canceled', TRUE),
+('order', 'failed', TRUE);
+
+-- ============================
+-- Estados para TICKETS
+-- ============================
+INSERT INTO status_generales (dominio, descripcion, activo) VALUES
+('ticket', 'issued', TRUE),
+('ticket', 'redeemed', TRUE),
+('ticket', 'canceled', TRUE);
+
+-- ============================
+-- Estados para PAYMENTS
+-- ============================
+INSERT INTO status_generales (dominio, descripcion, activo) VALUES
+('payment', 'created', TRUE),
+('payment', 'authorized', TRUE),
+('payment', 'captured', TRUE),
+('payment', 'failed', TRUE);
+
+-- ============================
+-- Estados para RESERVATIONS
+-- ============================
+INSERT INTO status_generales (dominio, descripcion, activo) VALUES
+('reservation', 'held', TRUE),
+('reservation', 'expired', TRUE),
+('reservation', 'confirmed', TRUE),
+('reservation', 'canceled', TRUE);
+
+-- ============================
+-- Estados para SEATS
+-- ============================
+INSERT INTO status_generales (dominio, descripcion, activo) VALUES
+('seat', 'available', TRUE),
+('seat', 'reserved', TRUE),
+('seat', 'occupied', TRUE);
+
+-- ============================
+-- Estados para NOTIFICATIONS
+-- ============================
+INSERT INTO status_generales (dominio, descripcion, activo) VALUES
+('notification', 'queued', TRUE),
+('notification', 'sent', TRUE),
+('notification', 'failed', TRUE);

@@ -1,14 +1,14 @@
 require("dotenv").config();
 const express = require("express");
 const sequelize = require("./db");
-const authRoutes = require("./routes/authRoute");
+const concertRoutes = require("./routes/concertRoute");
 
 const app = express();
 app.use(express.json());
 
-app.use("/auth", authRoutes);
+app.use("/concert", concertRoutes);
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3001;
 
 (async () => {
   try {
@@ -16,7 +16,7 @@ const port = process.env.PORT || 3000;
     console.log("Database connected and synced");
     
     app.listen(port, () => {
-      console.log(`Auth service running on port ${port}`);
+      console.log(`CONCERT service running on port ${port}`);
     });
   } catch (err) {
     console.error("Unable to connect to DB:", err);

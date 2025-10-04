@@ -8,6 +8,6 @@ router.post("/register", register);
 router.post("/login", login);
 
 // protegida: solo admin puede listar usuarios
-router.get("/users", authenticate, isAdmin, getUsers);
+router.get("/admin/users", authenticate, isAdmin, getUsers);
 
 module.exports = router;
