@@ -2,12 +2,12 @@ const User = require("../models/User");
 const { hashPassword, comparePassword } = require("../utils/hash");
 const { generateToken } = require("../utils/jwt");
 
-async function registerUser({ name, email, password }) {
+async function registerUser({ name, email, password, role }) {
   const existing = await User.findOne({ where: { email } });
   if (existing) throw new Error("User already exists");
 
   const hashed = await hashPassword(password);
-  const user = await User.create({ name, email, password: hashed });
+  const user = await User.create({ name, email, password: hashed, role_id: role });
 
   return { id: user.id, name: user.name, email: user.email, role: user.role };
 }
@@ -19,12 +19,13 @@ async function loginUser({ email, password }) {
   const valid = await comparePassword(password, user.password);
   if (!valid) throw new Error("Invalid credentials");
 
-  const token = generateToken({ id: user.id, role: user.role });
+    console.log(user)
+  const token = generateToken({ id: user.id, role: user.role_id });
   return { token };
 }
 
 async function listUsers() {
-  return await User.findAll({ attributes: ["id", "name", "email", "role", "created_at"] });
+  return await User.findAll({ attributes: ["id", "name", "email", "role_id", "created_at", "updated_at"] });
 }
 
 module.exports = { registerUser, loginUser, listUsers };

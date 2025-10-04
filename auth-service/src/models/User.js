@@ -3,8 +3,8 @@ const sequelize = require("../db");
 
 const User = sequelize.define("User", {
   id: {
-    type: DataTypes.UUID,
-    defaultValue: DataTypes.UUIDV4,
+    type: DataTypes.INTEGER,
+    autoIncrement: true,  
     primaryKey: true,
   },
   name: {
@@ -20,10 +20,14 @@ const User = sequelize.define("User", {
     type: DataTypes.STRING(255),
     allowNull: false,
   },
-  role: {
-    type: DataTypes.ENUM("user", "admin"),
-    defaultValue: "user",
-  },
+  role_id: {   // FK hacia roles
+    type: DataTypes.INTEGER,
+    allowNull: false,
+    references: {
+      model: "roles",   // nombre de la tabla
+      key: "id"
+    }
+  }
 }, {
   tableName: "users",
   timestamps: true,

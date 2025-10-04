@@ -11,11 +11,13 @@ async function authenticate(req, res, next) {
 
     const decoded = verifyToken(token);
 
-    // opcional: traer usuario de la BD para validar que existe
-    const user = await User.findByPk(decoded.id);
-    if (!user) return res.status(401).json({ error: "User not found" });
 
-    req.user = user; // inyectamos usuario en la request
+    // opcional: traer usuario de la BD para validar que existe
+    // const user = await User.findByPk(decoded.id);
+    // if (!user) return res.status(401).json({ error: "User not found" });
+
+    // console.log(user, '////////////////////')
+    req.user = decoded; // inyectamos usuario en la request
     next();
   } catch (err) {
     res.status(401).json({ error: "Unauthorized" });
@@ -23,7 +25,8 @@ async function authenticate(req, res, next) {
 }
 
 function isAdmin(req, res, next) {
-  if (req.user.role !== "admin") {
+  console.log(req.user.role , '=============')
+  if (req.user.role !== 1) {
     return res.status(403).json({ error: "Admin role required" });
   }
   next();
