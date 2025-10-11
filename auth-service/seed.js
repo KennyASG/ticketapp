@@ -8,7 +8,7 @@ async function seed() {
     await sequelize.sync({ force: true }); // elimina y recrea tablas
     console.log("Database synced");
 
-    // Hashear contraseñasa
+    // Hashear contraseñasaas
     const adminPass = await hashPassword("admin123");
     const user1Pass = await hashPassword("user123");
     const user2Pass = await hashPassword("user123");
