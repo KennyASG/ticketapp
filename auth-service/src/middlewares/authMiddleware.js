@@ -14,7 +14,7 @@ async function authenticate(req, res, next) {
 
     // opcional: traer usuario de la BD para validar que existe
     // const user = await User.findByPk(decoded.id);
-    // if (!user) return res.status(401).json({ error: "User not found" });
+    // if (!user) return res.status(401).json({ error: "User not found" });..
 
     // console.log(user, '////////////////////')
     req.user = decoded; // inyectamos usuario en la request
