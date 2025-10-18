@@ -15,6 +15,6 @@ spec:
     spec:
       containers:
         - name: auth-service
-          image: kennyasg/auth-service:latest
+          image: kennyadg/auth-service:latest
           ports:
             - containerPort: 3000
