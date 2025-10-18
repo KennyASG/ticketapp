@@ -1,0 +1,23 @@
+name: CD - Deploy Auth Service
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "master" ]  # O usa la rama 'main' si es la que prefieres
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, Linux, X64]  # Tu runner en master01
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Ver contexto del cluster
+        run: kubectl config current-context
+
+      - name: Validar nodos
+        run: kubectl get nodes -o wide
+
+      - name: Aplicar manifiestos auth-service
+        run: kubectl apply -f k8s/auth-service -n microservices
