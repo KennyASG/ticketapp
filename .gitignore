@@ -1,4 +1,5 @@
 /auth-service/node_modules
 /concert-service/node_modules
 /venue-service/node_modules
+/ticket-service/node_modules
 .idea/
