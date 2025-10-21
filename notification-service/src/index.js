@@ -1,0 +1,24 @@
+require("dotenv").config();
+const express = require("express");
+const sequelize = require("./db");
+const notificationRoutes = require("./routes/notificationRoute");
+
+const app = express();
+app.use(express.json());
+
+app.use("/", notificationRoutes);
+
+const port = process.env.PORT || 3005;
+
+(async () => {
+  try {
+    await sequelize.sync();
+    console.log("Database connected and synced");
+    
+    app.listen(port, '0.0.0.0', () => {
+      console.log(`NOTIFICATIONS service running on port ${port}`);
+    });
+  } catch (err) {
+    console.error("Unable to connect to DB:", err);
+  }
+})();

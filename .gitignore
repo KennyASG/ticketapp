@@ -2,4 +2,6 @@
 /concert-service/node_modules
 /venue-service/node_modules
 /ticket-service/node_modules
+/order-service/node_modules
+/notification-service/node_modules
 .idea/
