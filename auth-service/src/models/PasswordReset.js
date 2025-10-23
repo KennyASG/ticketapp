@@ -1,42 +1,38 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../db");
 
-const User = sequelize.define(
-  "User",
+const PasswordReset = sequelize.define(
+  "PasswordReset",
   {
     id: {
       type: DataTypes.INTEGER,
       autoIncrement: true,
       primaryKey: true,
     },
-    name: {
-      type: DataTypes.STRING(100),
-      allowNull: false,
-    },
-    email: {
-      type: DataTypes.STRING(150),
-      allowNull: false,
-      unique: true,
-    },
-    password: {
-      type: DataTypes.STRING(255),
-      allowNull: false,
-    },
-    role_id: {
+    user_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "roles",
+        model: "users",
         key: "id",
       },
     },
+    token: {
+      type: DataTypes.STRING(6),
+      allowNull: false,
+      defaultValue: "000000",
+    },
+    expires_at: {
+      type: DataTypes.DATE,
+      allowNull: false,
+    },
   },
   {
-    tableName: "users",
+    tableName: "password_resets",
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
   }
 );
 
-module.exports = User;
+module.exports = PasswordReset;
