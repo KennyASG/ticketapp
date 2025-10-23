@@ -6,7 +6,7 @@ const notificationRoutes = require("./routes/notificationRoute");
 const app = express();
 app.use(express.json());
 
-app.use("/", notificationRoutes);
+app.use("/notification", notificationRoutes);
 
 const port = process.env.PORT || 3005;
 

@@ -8,10 +8,10 @@ const { authenticate, isAdmin } = require("../middlewares/authMiddleware");
 // ===============================
 
 // Listar todos los conciertos
-router.get("/admin/concerts", authenticate, isAdmin, concertController.getAllConcerts);
+router.get("/concerts", authenticate, concertController.getAllConcerts);
 
 // Obtener un concierto por ID
-router.get("/admin/concert/:id", authenticate, isAdmin, concertController.getConcertById);
+router.get("/:id", authenticate, concertController.getConcertById);
 
 // Crear un nuevo concierto
 router.post("/admin/concert", authenticate, isAdmin, concertController.createConcert);
