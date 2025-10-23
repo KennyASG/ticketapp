@@ -102,6 +102,17 @@ Seat.belongsTo(VenueSection, {
   as: "section",
 });
 
+// Concert - ConcertSeat (One to Many)
+Concert.hasMany(ConcertSeat, {
+  foreignKey: "concert_id",
+  as: "concertSeats",
+});
+
+ConcertSeat.belongsTo(Concert, {
+  foreignKey: "concert_id",
+  as: "concert",
+});
+
 // Exportar modelos y sequelize
 module.exports = {
   sequelize,
