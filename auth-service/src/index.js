@@ -10,6 +10,9 @@ app.use("/auth", authRoutes);
 
 const port = process.env.PORT || 3000;
 
+const cors = require('cors');
+app.use(cors());
+
 (async () => {
   try {
     await sequelize.sync(); // crea tablas si no existen

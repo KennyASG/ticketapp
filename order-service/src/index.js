@@ -8,6 +8,9 @@ app.use(express.json());
 
 app.use("/order", orderRoutes);
 
+const cors = require('cors');
+app.use(cors());
+
 const port = process.env.PORT || 3004;
 
 (async () => {

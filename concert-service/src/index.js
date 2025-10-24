@@ -7,6 +7,8 @@ const app = express();
 app.use(express.json());
 
 app.use("/concert", concertRoutes);
+const cors = require('cors');
+app.use(cors());
 
 const port = process.env.PORT || 3001;
 

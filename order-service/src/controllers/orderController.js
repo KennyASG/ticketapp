@@ -1,3 +1,5 @@
+
+const { publishToQueue } = require("../../../ticket-service/src/workers/rabbitClient.cjs");
 const orderService = require("../services/orderService");
 
 /**
@@ -7,8 +9,12 @@ const createOrder = async (req, res) => {
   try {
     const userId = req.user.id;
     const result = await orderService.createOrder(userId, req.body);
+
+    await publishToQueue('reserva', result.order.id.toString());
+
     res.status(201).json(result);
   } catch (error) {
+
     res.status(400).json({ message: error.message });
   }
 };
@@ -33,7 +39,7 @@ const confirmOrder = async (req, res) => {
 const getUserOrders = async (req, res) => {
   try {
     const { userId } = req.params;
-    
+
     // Validar que el usuario solo pueda ver sus propias órdenes
     if (req.user.id !== parseInt(userId) && req.user.role !== 1) {
       return res.status(403).json({ message: "Acceso denegado" });
@@ -79,7 +85,7 @@ const getOrderById = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
     const isAdmin = req.user.role === 1;
-    
+
     const order = await orderService.getOrderById(id, userId, isAdmin);
     res.status(200).json(order);
   } catch (error) {

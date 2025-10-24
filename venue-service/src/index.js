@@ -8,6 +8,9 @@ app.use(express.json());
 
 app.use("/venue", venueRoutes);
 
+const cors = require('cors');
+app.use(cors());
+
 const port = process.env.PORT || 3002;
 
 (async () => {
