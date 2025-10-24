@@ -8,6 +8,15 @@ app.use(express.json());
 
 app.use("/venue", venueRoutes);
 
+// Health check endpoint (agregar antes de iniciar el servidor)
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    service: 'venue-service', 
+    timestamp: new Date().toISOString() 
+  });
+});
+
 const port = process.env.PORT || 3002;
 
 (async () => {
