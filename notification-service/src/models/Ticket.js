@@ -1,8 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../db");
 
-const Payment = sequelize.define(
-  "Payment",
+const Ticket = sequelize.define(
+  "Ticket",
   {
     id: {
       type: DataTypes.INTEGER,
@@ -12,34 +12,30 @@ const Payment = sequelize.define(
     order_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: {
-        model: "orders",
-        key: "id",
-      },
     },
-    provider: {
-      type: DataTypes.STRING(50),
-      defaultValue: "mock",
-    },
-    amount: {
+    ticket_type_id: {
       type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    seat_id: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
+    code: {
+      type: DataTypes.STRING(100),
       allowNull: false,
     },
     status_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: {
-        model: "status_generales",
-        key: "id",
-      },
     },
   },
   {
-    tableName: "payments",
+    tableName: "tickets",
     timestamps: true,
     createdAt: "created_at",
-    updatedAt: "updated_at",
+    updatedAt: false,
   }
 );
 
-module.exports = Payment;
+module.exports = Ticket;

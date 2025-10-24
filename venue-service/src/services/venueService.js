@@ -1,33 +1,71 @@
-const Venue = require("../models/Venue");
-const VenueSection = require("../models/VenueSection");
-const Seat = require("../models/Seat");
-const sequelize = require("../db");
+const { Venue, VenueSection, Seat, sequelize } = require("../models");
+const { Op } = require("sequelize");
 
 /**
  * Obtener todos los venues
  */
-const getAllVenues = async () => {
-  try {
-    const venues = await Venue.findAll({
-      order: [["created_at", "DESC"]],
+const getAllVenues = async (options = {}) => {
+  const { page = 1, limit = 20, includeSections = false } = options;
+  const offset = (page - 1) * limit;
+
+  const includes = [];
+  if (includeSections) {
+    includes.push({
+      model: VenueSection,
+      as: "sections",
+      attributes: ["id", "name", "capacity"],
     });
-    return venues;
-  } catch (error) {
-    throw new Error("Error al obtener venues: " + error.message);
   }
+
+  const { count, rows: venues } = await Venue.findAndCountAll({
+    include: includes,
+    limit,
+    offset,
+    order: [["created_at", "DESC"]],
+  });
+
+  return {
+    venues,
+    pagination: {
+      total: count,
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit),
+    },
+  };
 };
 
 /**
  * Obtener venue por ID
  */
-const getVenueById = async (id) => {
-  try {
-    const venue = await Venue.findByPk(id);
-    if (!venue) throw new Error("Venue no encontrado");
-    return venue;
-  } catch (error) {
-    throw new Error("Error al obtener venue: " + error.message);
+const getVenueById = async (id, includeDetails = false) => {
+  const includes = [];
+  
+  if (includeDetails) {
+    includes.push({
+      model: VenueSection,
+      as: "sections",
+      attributes: ["id", "name", "capacity"],
+      include: [
+        {
+          model: Seat,
+          as: "seats",
+          attributes: ["id", "seat_number"],
+          limit: 10,
+        },
+      ],
+    });
   }
+
+  const venue = await Venue.findByPk(id, {
+    include: includes,
+  });
+
+  if (!venue) {
+    throw new Error("Venue no encontrado");
+  }
+
+  return venue;
 };
 
 /**
@@ -60,7 +98,10 @@ const createVenue = async (data) => {
 const updateVenue = async (id, data) => {
   try {
     const venue = await Venue.findByPk(id);
-    if (!venue) throw new Error("Venue no encontrado");
+    
+    if (!venue) {
+      throw new Error("Venue no encontrado");
+    }
 
     await venue.update(data);
     return venue;
@@ -75,7 +116,10 @@ const updateVenue = async (id, data) => {
 const deleteVenue = async (id) => {
   try {
     const venue = await Venue.findByPk(id);
-    if (!venue) throw new Error("Venue no encontrado");
+    
+    if (!venue) {
+      throw new Error("Venue no encontrado");
+    }
 
     await venue.destroy();
     return { message: "Venue eliminado correctamente" };
@@ -91,8 +135,16 @@ const getSectionsByVenue = async (venueId) => {
   try {
     const sections = await VenueSection.findAll({
       where: { venue_id: venueId },
+      include: [
+        {
+          model: Venue,
+          as: "venue",
+          attributes: ["id", "name"],
+        },
+      ],
       order: [["name", "ASC"]],
     });
+
     return sections;
   } catch (error) {
     throw new Error("Error al obtener secciones: " + error.message);
@@ -104,6 +156,7 @@ const getSectionsByVenue = async (venueId) => {
  */
 const createSection = async (venueId, data) => {
   const transaction = await sequelize.transaction();
+  
   try {
     const { name, capacity } = data;
 
@@ -111,11 +164,24 @@ const createSection = async (venueId, data) => {
       throw new Error("Nombre y capacidad son obligatorios");
     }
 
-    // Verificar que el venue existe
-    const venue = await Venue.findByPk(venueId);
-    if (!venue) throw new Error("Venue no encontrado");
+    const venue = await Venue.findByPk(venueId, { transaction });
+    
+    if (!venue) {
+      throw new Error("Venue no encontrado");
+    }
 
-    // Crear sección
+    const existingSection = await VenueSection.findOne({
+      where: {
+        venue_id: venueId,
+        name: name,
+      },
+      transaction,
+    });
+
+    if (existingSection) {
+      throw new Error(`Ya existe una sección con el nombre "${name}" en este venue`);
+    }
+
     const newSection = await VenueSection.create(
       {
         venue_id: venueId,
@@ -125,7 +191,6 @@ const createSection = async (venueId, data) => {
       { transaction }
     );
 
-    // Generar asientos automáticamente
     const seats = [];
     for (let i = 1; i <= capacity; i++) {
       seats.push({
@@ -138,8 +203,18 @@ const createSection = async (venueId, data) => {
 
     await transaction.commit();
 
+    const sectionWithSeats = await VenueSection.findByPk(newSection.id, {
+      include: [
+        {
+          model: Seat,
+          as: "seats",
+          attributes: ["id", "seat_number"],
+        },
+      ],
+    });
+
     return {
-      section: newSection,
+      section: sectionWithSeats,
       message: `Sección creada con ${capacity} asientos`,
     };
   } catch (error) {
@@ -153,25 +228,42 @@ const createSection = async (venueId, data) => {
  */
 const updateSection = async (venueId, sectionId, data) => {
   const transaction = await sequelize.transaction();
+  
   try {
     const section = await VenueSection.findOne({
-      where: { id: sectionId, venue_id: venueId },
+      where: { 
+        id: sectionId, 
+        venue_id: venueId 
+      },
+      transaction,
     });
 
-    if (!section) throw new Error("Sección no encontrada");
+    if (!section) {
+      throw new Error("Sección no encontrada");
+    }
 
     const oldCapacity = section.capacity;
     const newCapacity = data.capacity || oldCapacity;
 
-    // Actualizar nombre si viene
     if (data.name) {
+      const existingSection = await VenueSection.findOne({
+        where: {
+          venue_id: venueId,
+          name: data.name,
+          id: { [Op.ne]: sectionId },
+        },
+        transaction,
+      });
+
+      if (existingSection) {
+        throw new Error(`Ya existe otra sección con el nombre "${data.name}" en este venue`);
+      }
+
       section.name = data.name;
     }
 
-    // Si la capacidad cambió, ajustar asientos
     if (newCapacity !== oldCapacity) {
       if (newCapacity > oldCapacity) {
-        // Agregar asientos
         const seatsToAdd = [];
         for (let i = oldCapacity + 1; i <= newCapacity; i++) {
           seatsToAdd.push({
@@ -181,12 +273,11 @@ const updateSection = async (venueId, sectionId, data) => {
         }
         await Seat.bulkCreate(seatsToAdd, { transaction });
       } else {
-        // Eliminar asientos
         await Seat.destroy({
           where: {
             section_id: sectionId,
             seat_number: {
-              [sequelize.Sequelize.Op.gt]: newCapacity,
+              [Op.gt]: newCapacity,
             },
           },
           transaction,
@@ -198,7 +289,17 @@ const updateSection = async (venueId, sectionId, data) => {
     await section.save({ transaction });
     await transaction.commit();
 
-    return section;
+    const updatedSection = await VenueSection.findByPk(sectionId, {
+      include: [
+        {
+          model: Seat,
+          as: "seats",
+          attributes: ["id", "seat_number"],
+        },
+      ],
+    });
+
+    return updatedSection;
   } catch (error) {
     await transaction.rollback();
     throw new Error("Error al actualizar sección: " + error.message);
@@ -211,15 +312,43 @@ const updateSection = async (venueId, sectionId, data) => {
 const deleteSection = async (venueId, sectionId) => {
   try {
     const section = await VenueSection.findOne({
-      where: { id: sectionId, venue_id: venueId },
+      where: { 
+        id: sectionId, 
+        venue_id: venueId 
+      },
     });
 
-    if (!section) throw new Error("Sección no encontrada");
+    if (!section) {
+      throw new Error("Sección no encontrada");
+    }
 
     await section.destroy();
     return { message: "Sección eliminada correctamente" };
   } catch (error) {
     throw new Error("Error al eliminar sección: " + error.message);
+  }
+};
+
+/**
+ * Obtener asientos de una sección
+ */
+const getSeatsBySection = async (sectionId) => {
+  try {
+    const seats = await Seat.findAll({
+      where: { section_id: sectionId },
+      include: [
+        {
+          model: VenueSection,
+          as: "section",
+          attributes: ["id", "name", "capacity"],
+        },
+      ],
+      order: [["seat_number", "ASC"]],
+    });
+
+    return seats;
+  } catch (error) {
+    throw new Error("Error al obtener asientos: " + error.message);
   }
 };
 
@@ -233,4 +362,5 @@ module.exports = {
   createSection,
   updateSection,
   deleteSection,
+  getSeatsBySection,
 };

@@ -1,45 +1,37 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../db");
 
-const Payment = sequelize.define(
-  "Payment",
+const Order = sequelize.define(
+  "Order",
   {
     id: {
       type: DataTypes.INTEGER,
       autoIncrement: true,
       primaryKey: true,
     },
-    order_id: {
+    user_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: {
-        model: "orders",
-        key: "id",
-      },
     },
-    provider: {
-      type: DataTypes.STRING(50),
-      defaultValue: "mock",
-    },
-    amount: {
+    concert_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
     status_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
-      references: {
-        model: "status_generales",
-        key: "id",
-      },
+    },
+    total: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
   },
   {
-    tableName: "payments",
+    tableName: "orders",
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
   }
 );
 
-module.exports = Payment;
+module.exports = Order;

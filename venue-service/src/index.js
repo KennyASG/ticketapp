@@ -6,7 +6,7 @@ const venueRoutes = require("./routes/venueRoute");
 const app = express();
 app.use(express.json());
 
-app.use("/", venueRoutes);
+app.use("/venue", venueRoutes);
 
 const port = process.env.PORT || 3002;
 

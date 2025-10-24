@@ -9,14 +9,14 @@ const { authenticate, isAdmin } = require("../middlewares/authMiddleware");
 
 // Enviar tickets por email
 router.post(
-  "/orders/:id/send-tickets",
+  "/order/:id/send-tickets",
   authenticate,
   notificationController.sendTickets
 );
 
 // Enviar confirmación de compra
 router.post(
-  "/orders/:id/send-confirmation",
+  "/order/:id/send-confirmation",
   authenticate,
   notificationController.sendConfirmation
 );

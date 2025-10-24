@@ -1,122 +1,148 @@
-const Concert = require("../models/Concert");
-const sequelize = require("../db");
+const { 
+  Concert, 
+  Venue, 
+  VenueSection, 
+  Seat, 
+  ConcertVenueDetail, 
+  ConcertSeat, 
+  StatusGeneral,
+  TicketType,
+  sequelize 
+} = require("../models");
 const { Op } = require("sequelize");
 
-const CONCERT_DURATION_HOURS = 4; // Duración fija de 4 horas
+const CONCERT_DURATION_HOURS = 4;
+
+/**
+ * Validar que no haya traslape de horarios
+ */
+const validateNoOverlap = async (venueId, date, excludeConcertId = null, transaction) => {
+  const concertDate = new Date(date);
+  const startDate = new Date(concertDate.getTime() - CONCERT_DURATION_HOURS * 60 * 60 * 1000);
+  const endDate = new Date(concertDate.getTime() + CONCERT_DURATION_HOURS * 60 * 60 * 1000);
+
+  const whereClause = {
+    date: {
+      [Op.or]: [
+        { [Op.between]: [startDate, endDate] },
+        {
+          [Op.and]: [
+            { [Op.lte]: startDate },
+            { [Op.gte]: endDate },
+          ],
+        },
+      ],
+    },
+  };
+
+  if (excludeConcertId) {
+    whereClause.id = { [Op.ne]: excludeConcertId };
+  }
+
+  const overlapping = await Concert.findAll({
+    where: whereClause,
+    include: [
+      {
+        model: Venue,
+        as: "venues",
+        where: { id: venueId },
+        through: { attributes: [] },
+        required: true,
+      },
+    ],
+    attributes: ["id", "title", "date"],
+    transaction,
+  });
+
+  if (overlapping.length > 0) {
+    const conflict = overlapping[0];
+    const conflictEnd = new Date(
+      new Date(conflict.date).getTime() + CONCERT_DURATION_HOURS * 60 * 60 * 1000
+    );
+    throw new Error(
+      `Traslape de horario detectado con el concierto "${
+        conflict.title
+      }" que se realiza de ${new Date(
+        conflict.date
+      ).toLocaleString()} a ${conflictEnd.toLocaleString()}`
+    );
+  }
+};
 
 /**
  * Obtener todos los conciertos
  */
-const getAllConcerts = async () => {
-  try {
-    const concerts = await sequelize.query(
-      `
-      SELECT 
-        c.*,
-        v.name as venue_name,
-        v.address as venue_address,
-        v.city as venue_city
-      FROM concerts c
-      LEFT JOIN concert_venue_detail cvd ON cvd.concert_id = c.id
-      LEFT JOIN venues v ON v.id = cvd.venue_id
-      ORDER BY c.date ASC
-      `,
+const getAllConcerts = async (options = {}) => {
+  const { page = 1, limit = 20 } = options;
+  const offset = (page - 1) * limit;
+
+  const { count, rows: concerts } = await Concert.findAndCountAll({
+    include: [
       {
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
-    return concerts;
-  } catch (error) {
-    throw new Error("Error al obtener los conciertos: " + error.message);
-  }
-};
-
-/**
- * Obtener un concierto por ID
- */
-const getConcertById = async (id) => {
-  try {
-    const concerts = await sequelize.query(
-      `
-      SELECT 
-        c.*,
-        v.id as venue_id,
-        v.name as venue_name,
-        v.address as venue_address,
-        v.city as venue_city,
-        v.country as venue_country
-      FROM concerts c
-      LEFT JOIN concert_venue_detail cvd ON cvd.concert_id = c.id
-      LEFT JOIN venues v ON v.id = cvd.venue_id
-      WHERE c.id = :concertId
-      LIMIT 1
-      `,
+        model: StatusGeneral,
+        as: "status",
+        attributes: ["id", "descripcion"],
+      },
       {
-        replacements: { concertId: id },
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
-
-    if (!concerts || concerts.length === 0) {
-      throw new Error("Concierto no encontrado");
-    }
-
-    return concerts[0];
-  } catch (error) {
-    throw new Error("Error al obtener el concierto: " + error.message);
-  }
-};
-
-/**
- * Validar que no haya traslape de horarios en el venue
- */
-const validateNoOverlap = async (venueId, concertDate, excludeConcertId = null, transaction) => {
-  const startDate = new Date(concertDate);
-  const endDate = new Date(startDate.getTime() + CONCERT_DURATION_HOURS * 60 * 60 * 1000);
-
-  // Query para buscar conciertos que se traslapen
-  let query = `
-    SELECT c.id, c.title, c.date
-    FROM concerts c
-    INNER JOIN concert_venue_detail cvd ON cvd.concert_id = c.id
-    WHERE cvd.venue_id = :venueId
-      AND (
-        -- El nuevo concierto empieza durante otro concierto
-        (c.date <= :startDate AND (c.date + INTERVAL '${CONCERT_DURATION_HOURS} hours') > :startDate)
-        OR
-        -- El nuevo concierto termina durante otro concierto
-        (c.date < :endDate AND (c.date + INTERVAL '${CONCERT_DURATION_HOURS} hours') >= :endDate)
-        OR
-        -- El nuevo concierto engloba completamente a otro
-        (c.date >= :startDate AND (c.date + INTERVAL '${CONCERT_DURATION_HOURS} hours') <= :endDate)
-      )
-  `;
-
-  const replacements = {
-    venueId,
-    startDate: startDate.toISOString(),
-    endDate: endDate.toISOString(),
-  };
-
-  // Si estamos actualizando, excluir el concierto actual
-  if (excludeConcertId) {
-    query += ` AND c.id != :excludeConcertId`;
-    replacements.excludeConcertId = excludeConcertId;
-  }
-
-  const overlapping = await sequelize.query(query, {
-    replacements,
-    type: sequelize.QueryTypes.SELECT,
-    transaction,
+        model: Venue,
+        as: "venues",
+        attributes: ["id", "name", "city", "country"],
+        through: { attributes: [] },
+      },
+    ],
+    limit,
+    offset,
+    order: [["date", "DESC"]],
   });
 
-  if (overlapping && overlapping.length > 0) {
-    const conflict = overlapping[0];
-    const conflictEnd = new Date(new Date(conflict.date).getTime() + CONCERT_DURATION_HOURS * 60 * 60 * 1000);
-    throw new Error(
-      `Traslape de horario detectado con el concierto "${conflict.title}" que se realiza de ${new Date(conflict.date).toLocaleString()} a ${conflictEnd.toLocaleString()}`
-    );
+  return {
+    concerts,
+    pagination: {
+      total: count,
+      page,
+      limit,
+      totalPages: Math.ceil(count / limit),
+    },
+  };
+};
+
+/**
+ * Obtener concierto por ID
+ */
+const getConcertById = async (id) => {
+  const concert = await Concert.findByPk(id, {
+    include: [
+      {
+        model: StatusGeneral,
+        as: "status",
+        attributes: ["id", "descripcion"],
+      },
+      {
+        model: Venue,
+        as: "venues",
+        attributes: ["id", "name", "address", "city", "country"],
+        through: { attributes: [] },
+        include: [
+          {
+            model: VenueSection,
+            as: "sections",
+            attributes: ["id", "name", "capacity"],
+          },
+        ],
+      },
+      {
+        model: TicketType,
+        as: "ticketTypes",
+        attributes: ["id", "name", "price", "available"],
+      },
+    ],
+  });
+
+  if (!concert) {
+    throw new Error("Concierto no encontrado");
   }
+
+  return concert;
 };
 
 /**
@@ -124,218 +150,166 @@ const validateNoOverlap = async (venueId, concertDate, excludeConcertId = null, 
  */
 const createConcert = async (data) => {
   const transaction = await sequelize.transaction();
+
   try {
     const { title, description, date, status_id, venue_id } = data;
 
-    // Validaciones
     if (!title || !description || !date || !status_id) {
-      throw new Error("Faltan campos obligatorios: title, description, date, status_id");
+      throw new Error("Faltan campos obligatorios");
     }
 
     if (!venue_id) {
-      throw new Error("El campo venue_id es obligatorio. Un concierto debe realizarse en un venue.");
+      throw new Error("El campo venue_id es obligatorio");
     }
 
-    // Validar que el venue exista
-    const venueExists = await sequelize.query(
-      `SELECT id FROM venues WHERE id = :venueId LIMIT 1`,
-      {
-        replacements: { venueId: venue_id },
-        type: sequelize.QueryTypes.SELECT,
-        transaction,
-      }
-    );
-
-    if (!venueExists || venueExists.length === 0) {
+    const venue = await Venue.findByPk(venue_id, { transaction });
+    if (!venue) {
       throw new Error(`El venue con ID ${venue_id} no existe`);
     }
 
-    // Validar que no haya traslape de horarios
     await validateNoOverlap(venue_id, date, null, transaction);
 
-    // 1. Crear el concierto
-    const newConcert = await Concert.create(
-      {
-        title,
-        description,
-        date,
-        status_id,
-      },
-      { transaction }
-    );
+    const newConcert = await Concert.create({
+      title,
+      description,
+      date,
+      status_id,
+    }, { transaction });
 
-    // 2. Crear relación concert_venue_detail
-    await sequelize.query(
-      `INSERT INTO concert_venue_detail (concert_id, venue_id) VALUES (:concertId, :venueId)`,
-      {
-        replacements: {
-          concertId: newConcert.id,
-          venueId: venue_id,
-        },
-        type: sequelize.QueryTypes.INSERT,
-        transaction,
-      }
-    );
+    await ConcertVenueDetail.create({
+      concert_id: newConcert.id,
+      venue_id: venue_id,
+    }, { transaction });
 
-    // 3. Obtener el status 'available' para seats
-    const availableStatus = await sequelize.query(
-      `SELECT id FROM status_generales WHERE dominio = 'seat' AND descripcion = 'available' LIMIT 1`,
-      {
-        type: sequelize.QueryTypes.SELECT,
-        transaction,
-      }
-    );
+    const availableStatus = await StatusGeneral.findOne({
+      where: { dominio: "seat", descripcion: "available" },
+      transaction,
+    });
 
-    if (!availableStatus || availableStatus.length === 0) {
-      throw new Error("Estado 'available' para seats no encontrado en status_generales");
+    if (!availableStatus) {
+      throw new Error("Estado 'available' no encontrado");
     }
 
-    const statusId = availableStatus[0].id;
+    const seats = await Seat.findAll({
+      include: [{
+        model: VenueSection,
+        as: "section",
+        where: { venue_id: venue_id },
+        required: true,
+      }],
+      transaction,
+    });
 
-    // 4. Copiar TODOS los asientos del venue a concert_seats con estado 'available'
-    await sequelize.query(
-      `
-      INSERT INTO concert_seats (concert_id, seat_id, status_id)
-      SELECT :concertId, s.id, :statusId
-      FROM seats s
-      INNER JOIN venue_sections vs ON vs.id = s.section_id
-      WHERE vs.venue_id = :venueId
-      `,
-      {
-        replacements: {
-          concertId: newConcert.id,
-          venueId: venue_id,
-          statusId: statusId,
-        },
-        type: sequelize.QueryTypes.INSERT,
-        transaction,
-      }
-    );
+    if (seats.length === 0) {
+      throw new Error("El venue no tiene asientos configurados");
+    }
+
+    const concertSeatsData = seats.map((seat) => ({
+      concert_id: newConcert.id,
+      seat_id: seat.id,
+      status_id: availableStatus.id,
+    }));
+
+    await ConcertSeat.bulkCreate(concertSeatsData, { transaction });
 
     await transaction.commit();
 
-    // Devolver el concierto con información del venue
-    return await getConcertById(newConcert.id);
+    const createdConcert = await Concert.findByPk(newConcert.id, {
+      include: [
+        { model: StatusGeneral, as: "status" },
+        { model: Venue, as: "venues", through: { attributes: [] } },
+      ],
+    });
+
+    return createdConcert;
   } catch (error) {
     await transaction.rollback();
-    throw new Error("Error al crear el concierto: " + error.message);
+    throw new Error("Error al crear concierto: " + error.message);
   }
 };
 
 /**
- * Actualizar un concierto existente
+ * Actualizar un concierto
  */
 const updateConcert = async (id, data) => {
   const transaction = await sequelize.transaction();
+
   try {
     const concert = await Concert.findByPk(id, { transaction });
-    if (!concert) throw new Error("Concierto no encontrado");
+    if (!concert) {
+      throw new Error("Concierto no encontrado");
+    }
 
-    // Si se está actualizando la fecha o el venue, validar traslapes
-    if (data.date || data.venue_id) {
-      // Obtener el venue actual si no viene en data
-      let venueId = data.venue_id;
-      
-      if (!venueId) {
-        const currentVenue = await sequelize.query(
-          `SELECT venue_id FROM concert_venue_detail WHERE concert_id = :concertId LIMIT 1`,
-          {
-            replacements: { concertId: id },
-            type: sequelize.QueryTypes.SELECT,
-            transaction,
-          }
-        );
-        venueId = currentVenue && currentVenue.length > 0 ? currentVenue[0].venue_id : null;
-      }
+    if (data.venue_id) {
+      const concertVenueDetail = await ConcertVenueDetail.findOne({
+        where: { concert_id: id },
+        transaction,
+      });
 
-      if (venueId) {
-        const newDate = data.date || concert.date;
-        await validateNoOverlap(venueId, newDate, id, transaction);
-      }
-
-      // Si se cambió el venue, actualizar concert_venue_detail y concert_seats
-      if (data.venue_id && data.venue_id !== venueId) {
-        // Validar que el nuevo venue exista
-        const venueExists = await sequelize.query(
-          `SELECT id FROM venues WHERE id = :venueId LIMIT 1`,
-          {
-            replacements: { venueId: data.venue_id },
-            type: sequelize.QueryTypes.SELECT,
-            transaction,
-          }
-        );
-
-        if (!venueExists || venueExists.length === 0) {
+      if (concertVenueDetail && data.venue_id !== concertVenueDetail.venue_id) {
+        const newVenue = await Venue.findByPk(data.venue_id, { transaction });
+        if (!newVenue) {
           throw new Error(`El venue con ID ${data.venue_id} no existe`);
         }
 
-        // Actualizar concert_venue_detail
-        await sequelize.query(
-          `UPDATE concert_venue_detail SET venue_id = :venueId WHERE concert_id = :concertId`,
-          {
-            replacements: {
-              venueId: data.venue_id,
-              concertId: id,
-            },
-            type: sequelize.QueryTypes.UPDATE,
-            transaction,
-          }
-        );
+        const dateToCheck = data.date || concert.date;
+        await validateNoOverlap(data.venue_id, dateToCheck, id, transaction);
 
-        // Eliminar concert_seats antiguos
-        await sequelize.query(
-          `DELETE FROM concert_seats WHERE concert_id = :concertId`,
-          {
-            replacements: { concertId: id },
-            type: sequelize.QueryTypes.DELETE,
-            transaction,
-          }
-        );
+        await concertVenueDetail.update({ venue_id: data.venue_id }, { transaction });
 
-        // Crear nuevos concert_seats del nuevo venue
-        const availableStatus = await sequelize.query(
-          `SELECT id FROM status_generales WHERE dominio = 'seat' AND descripcion = 'available' LIMIT 1`,
-          {
-            type: sequelize.QueryTypes.SELECT,
-            transaction,
-          }
-        );
+        await ConcertSeat.destroy({ where: { concert_id: id }, transaction });
 
-        if (availableStatus && availableStatus.length > 0) {
-          const statusId = availableStatus[0].id;
-          
-          await sequelize.query(
-            `
-            INSERT INTO concert_seats (concert_id, seat_id, status_id)
-            SELECT :concertId, s.id, :statusId
-            FROM seats s
-            INNER JOIN venue_sections vs ON vs.id = s.section_id
-            WHERE vs.venue_id = :venueId
-            `,
-            {
-              replacements: {
-                concertId: id,
-                venueId: data.venue_id,
-                statusId: statusId,
-              },
-              type: sequelize.QueryTypes.INSERT,
-              transaction,
-            }
-          );
-        }
+        const seats = await Seat.findAll({
+          include: [{
+            model: VenueSection,
+            as: "section",
+            where: { venue_id: data.venue_id },
+            required: true,
+          }],
+          transaction,
+        });
+
+        const availableStatus = await StatusGeneral.findOne({
+          where: { dominio: "seat", descripcion: "available" },
+          transaction,
+        });
+
+        const concertSeatsData = seats.map((seat) => ({
+          concert_id: id,
+          seat_id: seat.id,
+          status_id: availableStatus.id,
+        }));
+
+        await ConcertSeat.bulkCreate(concertSeatsData, { transaction });
       }
     }
 
-    // Actualizar los campos del concierto
-    const { venue_id, ...concertData } = data; // Excluir venue_id ya que no está en la tabla concerts
-    await concert.update(concertData, { transaction });
+    if (data.date && data.date !== concert.date) {
+      const concertVenueDetail = await ConcertVenueDetail.findOne({
+        where: { concert_id: id },
+        transaction,
+      });
+
+      if (concertVenueDetail) {
+        await validateNoOverlap(concertVenueDetail.venue_id, data.date, id, transaction);
+      }
+    }
+
+    await concert.update(data, { transaction });
 
     await transaction.commit();
 
-    return await getConcertById(id);
+    const updatedConcert = await Concert.findByPk(id, {
+      include: [
+        { model: StatusGeneral, as: "status" },
+        { model: Venue, as: "venues", through: { attributes: [] } },
+      ],
+    });
+
+    return updatedConcert;
   } catch (error) {
     await transaction.rollback();
-    throw new Error("Error al actualizar el concierto: " + error.message);
+    throw new Error("Error al actualizar concierto: " + error.message);
   }
 };
 
@@ -344,42 +318,75 @@ const updateConcert = async (id, data) => {
  */
 const deleteConcert = async (id) => {
   const transaction = await sequelize.transaction();
+
   try {
     const concert = await Concert.findByPk(id, { transaction });
-    if (!concert) throw new Error("Concierto no encontrado");
-
-    // Verificar si hay órdenes confirmadas para este concierto
-    const ordersExist = await sequelize.query(
-      `
-      SELECT COUNT(*) as count
-      FROM orders
-      WHERE concert_id = :concertId
-        AND status_id IN (
-          SELECT id FROM status_generales 
-          WHERE dominio = 'order' AND descripcion = 'confirmed'
-        )
-      `,
-      {
-        replacements: { concertId: id },
-        type: sequelize.QueryTypes.SELECT,
-        transaction,
-      }
-    );
-
-    if (ordersExist && ordersExist[0].count > 0) {
-      throw new Error("No se puede eliminar el concierto porque ya tiene órdenes confirmadas");
+    if (!concert) {
+      throw new Error("Concierto no encontrado");
     }
 
-    // Las relaciones se eliminan en cascada por las foreign keys
     await concert.destroy({ transaction });
-
     await transaction.commit();
 
     return { message: "Concierto eliminado correctamente" };
   } catch (error) {
     await transaction.rollback();
-    throw new Error("Error al eliminar el concierto: " + error.message);
+    throw new Error("Error al eliminar concierto: " + error.message);
   }
+};
+
+/**
+ * Obtener asientos disponibles de un concierto
+ */
+const getAvailableSeats = async (concertId) => {
+  const availableStatus = await StatusGeneral.findOne({
+    where: { dominio: "seat", descripcion: "available" },
+  });
+
+  if (!availableStatus) {
+    throw new Error("Estado 'available' no encontrado");
+  }
+
+  const availableSeats = await ConcertSeat.findAll({
+    where: {
+      concert_id: concertId,
+      status_id: availableStatus.id,
+    },
+    include: [{
+      model: Seat,
+      as: "seat",
+      attributes: ["id", "seat_number"],
+      include: [{
+        model: VenueSection,
+        as: "section",
+        attributes: ["id", "name", "capacity"],
+      }],
+    }],
+    order: [
+      [{ model: Seat, as: "seat" }, { model: VenueSection, as: "section" }, "name", "ASC"],
+      [{ model: Seat, as: "seat" }, "seat_number", "ASC"],
+    ],
+  });
+
+  const seatsBySection = {};
+
+  availableSeats.forEach((concertSeat) => {
+    const sectionName = concertSeat.seat.section.name;
+    if (!seatsBySection[sectionName]) {
+      seatsBySection[sectionName] = {
+        section_id: concertSeat.seat.section.id,
+        section_name: sectionName,
+        capacity: concertSeat.seat.section.capacity,
+        available_seats: [],
+      };
+    }
+    seatsBySection[sectionName].available_seats.push({
+      seat_id: concertSeat.seat.id,
+      seat_number: concertSeat.seat.seat_number,
+    });
+  });
+
+  return Object.values(seatsBySection);
 };
 
 module.exports = {
@@ -388,4 +395,5 @@ module.exports = {
   createConcert,
   updateConcert,
   deleteConcert,
+  getAvailableSeats,
 };

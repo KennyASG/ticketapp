@@ -8,13 +8,13 @@ const { authenticate, isAdmin } = require("../middlewares/authMiddleware");
 // ===============================
 
 // Crear orden
-router.post("/orders", authenticate, orderController.createOrder);
+router.post("/", authenticate, orderController.createOrder);
 
 // Confirmar orden (procesar pago)
-router.post("/orders/:id/confirm", authenticate, orderController.confirmOrder);
+router.post("/:id/confirm", authenticate, orderController.confirmOrder);
 
 // Ver detalle de orden
-router.get("/orders/:id", authenticate, orderController.getOrderById);
+router.get("/:id", authenticate, orderController.getOrderById);
 
 // Ver mis órdenes
 router.get("/orders/user/:userId", authenticate, orderController.getUserOrders);
@@ -28,7 +28,7 @@ router.get("/admin/orders", authenticate, isAdmin, orderController.getAllOrders)
 
 // Ver ventas por concierto
 router.get(
-  "/admin/concerts/:id/sales",
+  "/admin/concert/:id/sales",
   authenticate,
   isAdmin,
   orderController.getSalesByConcert

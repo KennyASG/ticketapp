@@ -1,20 +1,32 @@
-const Order = require("../models/Order");
-const OrderItem = require("../models/OrderItem");
-const Ticket = require("../models/Ticket");
-const Payment = require("../models/Payment");
-const Reservation = require("../models/Reservation");
-const TicketType = require("../models/TicketType");
-const ConcertSeat = require("../models/ConcertSeat");
-const StatusGeneral = require("../models/StatusGeneral");
-const sequelize = require("../db");
-const { generateTicketCode } = require("../utils/codeGenerator");
+const {
+  Order,
+  OrderItem,
+  Ticket,
+  Payment,
+  Reservation,
+  User,
+  Concert,
+  TicketType,
+  Seat,
+  StatusGeneral,
+  ConcertSeat,
+  sequelize,
+} = require("../models");
 const { Op } = require("sequelize");
+
+// Función para generar código único de ticket
+const generateTicketCode = (orderId, ticketNumber) => {
+  const timestamp = Date.now().toString(36);
+  const random = Math.random().toString(36).substring(2, 7);
+  return `TKT-${orderId}-${ticketNumber}-${timestamp}-${random}`.toUpperCase();
+};
 
 /**
  * Crear orden a partir de una reserva
  */
 const createOrder = async (userId, data) => {
   const transaction = await sequelize.transaction();
+  
   try {
     const { reservation_id, ticket_type_id, quantity } = data;
 
@@ -22,9 +34,10 @@ const createOrder = async (userId, data) => {
       throw new Error("Datos de orden inválidos");
     }
 
-    // 1. Verificar que la reserva existe, pertenece al usuario y está activa
+    // Verificar que la reserva existe y pertenece al usuario
     const heldStatus = await StatusGeneral.findOne({
       where: { dominio: "reservation", descripcion: "held" },
+      transaction,
     });
 
     const reservation = await Reservation.findOne({
@@ -40,12 +53,11 @@ const createOrder = async (userId, data) => {
       throw new Error("Reserva no encontrada o ya expiró");
     }
 
-    // 2. Verificar que no haya expirado
     if (new Date() > new Date(reservation.expires_at)) {
       throw new Error("La reserva ha expirado");
     }
 
-    // 3. Obtener ticket type y calcular total
+    // Obtener ticket type y calcular total
     const ticketType = await TicketType.findByPk(ticket_type_id, {
       transaction,
     });
@@ -56,12 +68,13 @@ const createOrder = async (userId, data) => {
 
     const total = ticketType.price * quantity;
 
-    // 4. Obtener status 'pending' para orders
+    // Obtener status 'pending' para orders
     const pendingStatus = await StatusGeneral.findOne({
       where: { dominio: "order", descripcion: "pending" },
+      transaction,
     });
 
-    // 5. Crear orden
+    // Crear orden
     const order = await Order.create(
       {
         user_id: userId,
@@ -72,12 +85,12 @@ const createOrder = async (userId, data) => {
       { transaction }
     );
 
-    // 6. Crear order items
+    // Crear order items
     await OrderItem.create(
       {
         order_id: order.id,
         ticket_type_id,
-        seat_id: null, // Se asignarán al confirmar
+        seat_id: null,
         quantity,
         unit_price: ticketType.price,
       },
@@ -102,87 +115,67 @@ const createOrder = async (userId, data) => {
  */
 const confirmOrder = async (orderId, userId) => {
   const transaction = await sequelize.transaction();
+  
   try {
-    // 1. Obtener orden
+    // Verificar que la orden existe y pertenece al usuario
+    const pendingStatus = await StatusGeneral.findOne({
+      where: { dominio: "order", descripcion: "pending" },
+      transaction,
+    });
+
     const order = await Order.findOne({
-      where: { id: orderId, user_id: userId },
+      where: {
+        id: orderId,
+        user_id: userId,
+        status_id: pendingStatus.id,
+      },
       transaction,
     });
 
     if (!order) {
-      throw new Error("Orden no encontrada");
+      throw new Error("Orden no encontrada o ya fue procesada");
     }
 
-    // 2. Verificar que esté pending
-    const pendingStatus = await StatusGeneral.findOne({
-      where: { dominio: "order", descripcion: "pending" },
-    });
-
-    if (order.status_id !== pendingStatus.id) {
-      throw new Error("La orden ya fue procesada");
-    }
-
-    // 3. Obtener order items
+    // Obtener order items
     const orderItems = await OrderItem.findAll({
       where: { order_id: orderId },
       transaction,
     });
 
-    if (orderItems.length === 0) {
-      throw new Error("Orden sin items");
-    }
-
-    // 4. Simular pago
-    const paymentCapturedStatus = await StatusGeneral.findOne({
+    // Simular pago
+    const capturedStatus = await StatusGeneral.findOne({
       where: { dominio: "payment", descripcion: "captured" },
+      transaction,
     });
 
-    const payment = await Payment.create(
+    await Payment.create(
       {
         order_id: orderId,
         provider: "mock",
         amount: order.total,
-        status_id: paymentCapturedStatus.id,
+        status_id: capturedStatus.id,
       },
       { transaction }
     );
 
-    // Simular fallo aleatorio (10% de probabilidad)
-    const shouldFail = Math.random() < 0.1;
-    if (shouldFail) {
-      const failedStatus = await StatusGeneral.findOne({
-        where: { dominio: "payment", descripcion: "failed" },
-      });
-
-      payment.status_id = failedStatus.id;
-      await payment.save({ transaction });
-
-      const orderFailedStatus = await StatusGeneral.findOne({
-        where: { dominio: "order", descripcion: "failed" },
-      });
-
-      order.status_id = orderFailedStatus.id;
-      await order.save({ transaction });
-
-      await transaction.commit();
-      throw new Error("El pago fue rechazado");
-    }
-
-    // 5. Pago exitoso - Confirmar orden
+    // Confirmar orden
     const confirmedStatus = await StatusGeneral.findOne({
       where: { dominio: "order", descripcion: "confirmed" },
+      transaction,
     });
 
     order.status_id = confirmedStatus.id;
     await order.save({ transaction });
 
-    // 6. Generar tickets con códigos únicos
+    // Generar tickets con códigos únicos
     const ticketIssuedStatus = await StatusGeneral.findOne({
       where: { dominio: "ticket", descripcion: "issued" },
+      transaction,
     });
 
     const occupiedStatus = await StatusGeneral.findOne({
       where: { dominio: "seat", descripcion: "occupied" },
+      transaction,
     });
 
     const tickets = [];
@@ -198,33 +191,31 @@ const confirmOrder = async (orderId, userId) => {
       if (ticketType.section_id) {
         const reservedStatus = await StatusGeneral.findOne({
           where: { dominio: "seat", descripcion: "reserved" },
+          transaction,
         });
 
         // Obtener asientos reservados
-        assignedSeats = await sequelize.query(
-          `
-          SELECT cs.id, cs.seat_id
-          FROM concert_seats cs
-          INNER JOIN seats s ON s.id = cs.seat_id
-          WHERE cs.concert_id = :concertId
-            AND s.section_id = :sectionId
-            AND cs.status_id = :reservedStatusId
-          LIMIT :quantity
-          `,
-          {
-            replacements: {
-              concertId: order.concert_id,
-              sectionId: ticketType.section_id,
-              reservedStatusId: reservedStatus.id,
-              quantity: item.quantity,
+        const concertSeats = await ConcertSeat.findAll({
+          where: {
+            concert_id: order.concert_id,
+            status_id: reservedStatus.id,
+          },
+          include: [
+            {
+              model: Seat,
+              as: "seat",
+              where: { section_id: ticketType.section_id },
+              required: true,
             },
-            type: sequelize.QueryTypes.SELECT,
-            transaction,
-          }
-        );
+          ],
+          limit: item.quantity,
+          transaction,
+        });
+
+        assignedSeats = concertSeats;
 
         // Marcar asientos como ocupados
-        const seatIds = assignedSeats.map((s) => s.id);
+        const seatIds = assignedSeats.map((cs) => cs.id);
         await ConcertSeat.update(
           { status_id: occupiedStatus.id },
           {
@@ -255,9 +246,10 @@ const confirmOrder = async (orderId, userId) => {
       }
     }
 
-    // 7. Confirmar reserva
+    // Confirmar reserva
     const reservationConfirmedStatus = await StatusGeneral.findOne({
       where: { dominio: "reservation", descripcion: "confirmed" },
+      transaction,
     });
 
     await Reservation.update(
@@ -270,15 +262,31 @@ const confirmOrder = async (orderId, userId) => {
 
     await transaction.commit();
 
-    // 8. Trigger notificación (llamada externa)
-    // TODO: Llamar a NOTIFICATIONS service
-    // await notifyUser(userId, orderId);
+    // Recargar orden con relaciones
+    const confirmedOrder = await Order.findByPk(orderId, {
+      include: [
+        {
+          model: Concert,
+          as: "concert",
+          attributes: ["id", "title", "date"],
+        },
+        {
+          model: StatusGeneral,
+          as: "status",
+          attributes: ["descripcion"],
+        },
+        {
+          model: Ticket,
+          as: "tickets",
+          attributes: ["id", "code"],
+        },
+      ],
+    });
 
     return {
-      order,
-      payment,
+      order: confirmedOrder,
       tickets,
-      message: "Compra confirmada exitosamente",
+      message: "Orden confirmada exitosamente",
     };
   } catch (error) {
     await transaction.rollback();
@@ -293,8 +301,26 @@ const getUserOrders = async (userId) => {
   try {
     const orders = await Order.findAll({
       where: { user_id: userId },
+      include: [
+        {
+          model: Concert,
+          as: "concert",
+          attributes: ["id", "title", "date"],
+        },
+        {
+          model: StatusGeneral,
+          as: "status",
+          attributes: ["descripcion"],
+        },
+        {
+          model: Ticket,
+          as: "tickets",
+          attributes: ["id", "code"],
+        },
+      ],
       order: [["created_at", "DESC"]],
     });
+
     return orders;
   } catch (error) {
     throw new Error("Error al obtener órdenes: " + error.message);
@@ -304,12 +330,43 @@ const getUserOrders = async (userId) => {
 /**
  * Obtener todas las órdenes (Admin)
  */
-const getAllOrders = async () => {
+const getAllOrders = async (options = {}) => {
+  const { page = 1, limit = 20 } = options;
+  const offset = (page - 1) * limit;
+
   try {
-    const orders = await Order.findAll({
+    const { count, rows: orders } = await Order.findAndCountAll({
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "name", "email"],
+        },
+        {
+          model: Concert,
+          as: "concert",
+          attributes: ["id", "title", "date"],
+        },
+        {
+          model: StatusGeneral,
+          as: "status",
+          attributes: ["descripcion"],
+        },
+      ],
+      limit,
+      offset,
       order: [["created_at", "DESC"]],
     });
-    return orders;
+
+    return {
+      orders,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    };
   } catch (error) {
     throw new Error("Error al obtener órdenes: " + error.message);
   }
@@ -324,42 +381,56 @@ const getSalesByConcert = async (concertId) => {
       where: { dominio: "order", descripcion: "confirmed" },
     });
 
-    const sales = await sequelize.query(
-      `
-      SELECT 
-        o.id as order_id,
-        o.user_id,
-        o.total,
-        o.created_at,
-        COUNT(t.id) as tickets_count
-      FROM orders o
-      LEFT JOIN tickets t ON t.order_id = o.id
-      WHERE o.concert_id = :concertId
-        AND o.status_id = :confirmedStatusId
-      GROUP BY o.id
-      ORDER BY o.created_at DESC
-      `,
-      {
-        replacements: {
-          concertId,
-          confirmedStatusId: confirmedStatus.id,
+    const orders = await Order.findAll({
+      where: {
+        concert_id: concertId,
+        status_id: confirmedStatus.id,
+      },
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "name", "email"],
         },
-        type: sequelize.QueryTypes.SELECT,
-      }
-    );
+        {
+          model: Ticket,
+          as: "tickets",
+          attributes: ["id", "code"],
+        },
+        {
+          model: OrderItem,
+          as: "items",
+          include: [
+            {
+              model: TicketType,
+              as: "ticketType",
+              attributes: ["name", "price"],
+            },
+          ],
+        },
+      ],
+      order: [["created_at", "DESC"]],
+    });
 
-    const totalRevenue = sales.reduce((sum, sale) => sum + sale.total, 0);
-    const totalTickets = sales.reduce(
-      (sum, sale) => sum + parseInt(sale.tickets_count),
+    const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+    const totalTickets = orders.reduce(
+      (sum, order) => sum + order.tickets.length,
       0
     );
 
     return {
       concert_id: concertId,
-      total_orders: sales.length,
+      total_orders: orders.length,
       total_tickets: totalTickets,
       total_revenue: totalRevenue,
-      sales,
+      orders: orders.map((order) => ({
+        id: order.id,
+        user: order.user,
+        total: order.total,
+        tickets_count: order.tickets.length,
+        items: order.items,
+        created_at: order.created_at,
+      })),
     };
   } catch (error) {
     throw new Error("Error al obtener ventas: " + error.message);
@@ -367,41 +438,59 @@ const getSalesByConcert = async (concertId) => {
 };
 
 /**
- * Obtener detalle de una orden
+ * Obtener orden por ID
  */
-const getOrderById = async (orderId, userId, isAdmin = false) => {
+const getOrderById = async (orderId, userId = null) => {
   try {
-    const whereClause = isAdmin ? { id: orderId } : { id: orderId, user_id: userId };
-    
+    const whereClause = userId ? { id: orderId, user_id: userId } : { id: orderId };
+
     const order = await Order.findOne({
       where: whereClause,
+      include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "name", "email"],
+        },
+        {
+          model: Concert,
+          as: "concert",
+          attributes: ["id", "title", "date"],
+        },
+        {
+          model: StatusGeneral,
+          as: "status",
+          attributes: ["descripcion"],
+        },
+        {
+          model: OrderItem,
+          as: "items",
+          include: [
+            {
+              model: TicketType,
+              as: "ticketType",
+              attributes: ["name", "price"],
+            },
+          ],
+        },
+        {
+          model: Ticket,
+          as: "tickets",
+          attributes: ["id", "code", "seat_id"],
+        },
+        {
+          model: Payment,
+          as: "payment",
+          attributes: ["id", "provider", "amount"],
+        },
+      ],
     });
 
     if (!order) {
       throw new Error("Orden no encontrada");
     }
 
-    // Obtener items
-    const items = await OrderItem.findAll({
-      where: { order_id: orderId },
-    });
-
-    // Obtener tickets
-    const tickets = await Ticket.findAll({
-      where: { order_id: orderId },
-    });
-
-    // Obtener payment
-    const payment = await Payment.findOne({
-      where: { order_id: orderId },
-    });
-
-    return {
-      order,
-      items,
-      tickets,
-      payment,
-    };
+    return order;
   } catch (error) {
     throw new Error("Error al obtener orden: " + error.message);
   }

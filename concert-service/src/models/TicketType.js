@@ -1,45 +1,49 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../db");
 
-const Payment = sequelize.define(
-  "Payment",
+const TicketType = sequelize.define(
+  "TicketType",
   {
     id: {
       type: DataTypes.INTEGER,
       autoIncrement: true,
       primaryKey: true,
     },
-    order_id: {
+    concert_id: {
       type: DataTypes.INTEGER,
       allowNull: false,
       references: {
-        model: "orders",
+        model: "concerts",
         key: "id",
       },
     },
-    provider: {
-      type: DataTypes.STRING(50),
-      defaultValue: "mock",
-    },
-    amount: {
+    section_id: {
       type: DataTypes.INTEGER,
-      allowNull: false,
-    },
-    status_id: {
-      type: DataTypes.INTEGER,
-      allowNull: false,
+      allowNull: true,
       references: {
-        model: "status_generales",
+        model: "venue_sections",
         key: "id",
       },
+    },
+    name: {
+      type: DataTypes.STRING(100),
+      allowNull: false,
+    },
+    price: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+    },
+    available: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
     },
   },
   {
-    tableName: "payments",
+    tableName: "ticket_types",
     timestamps: true,
     createdAt: "created_at",
     updatedAt: "updated_at",
   }
 );
 
-module.exports = Payment;
+module.exports = TicketType;
