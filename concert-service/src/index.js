@@ -7,6 +7,8 @@ const app = express();
 app.use(express.json());
 
 app.use("/concert", concertRoutes);
+const cors = require('cors');
+app.use(cors());
 
 // Health check endpoint (agregar antes de iniciar el servidor)
 app.get('/health', (req, res) => {

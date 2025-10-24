@@ -17,6 +17,9 @@ app.get('/health', (req, res) => {
   });
 });
 
+const cors = require('cors');
+app.use(cors());
+
 const port = process.env.PORT || 3004;
 
 (async () => {
