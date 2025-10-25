@@ -1,5 +1,5 @@
 const ticketService = require("../services/ticketService");
-const publishToQueue = require("../workers/rabbitClient.cjs");
+// const publishToQueue = require("../workers/rabbitClient.cjs");
 
 
 /**
@@ -71,7 +71,7 @@ const createReservation = async (req, res) => {
     const userId = req.user.id;
     const result = await ticketService.createReservation(userId, req.body);
     
-    await publishToQueue('reserva', result.reservation.id.toString());
+  //  await publishToQueue('reserva', result.reservation.id.toString());
     
     res.status(201).json(result);
   } catch (error) {
