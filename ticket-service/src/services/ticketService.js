@@ -1,11 +1,15 @@
-const TicketType = require("../models/TicketType");
-const Reservation = require("../models/Reservation");
-const ReservationSeat = require("../models/ReservationSeat");
-const ConcertSeat = require("../models/ConcertSeat");
-const Seat = require("../models/Seat");
-const Concert = require("../models/Concert");
-const StatusGeneral = require("../models/StatusGeneral");
-const sequelize = require("../db");
+const {
+  TicketType,
+  Reservation,
+  ReservationSeat,
+  Concert,
+  User,
+  StatusGeneral,
+  ConcertSeat,
+  Seat,
+  VenueSection,
+  sequelize,
+} = require("../models");  // ← Importar desde index.js
 const { Op } = require("sequelize");
 
 /**
