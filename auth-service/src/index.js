@@ -28,6 +28,6 @@ app.get("/health", (req, res) => {
     console.log("Database connected and synced");
     app.listen(port, "0.0.0.0", () => console.log(`Auth service running on port ${port}`));
   } catch (err) {
-    console.error("Unable to connect to DB:", err);
+    console.error("Unable to connect to DB, please check:", err);
   }
 })();
