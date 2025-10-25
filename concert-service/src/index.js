@@ -10,6 +10,15 @@ app.use("/concert", concertRoutes);
 const cors = require('cors');
 app.use(cors());
 
+// Health check endpoint (agregar antes de iniciar el servidor)
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    service: 'concert-service', 
+    timestamp: new Date().toISOString() 
+  });
+});
+
 const port = process.env.PORT || 3001;
 
 (async () => {

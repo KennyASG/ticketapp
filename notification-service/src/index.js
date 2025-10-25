@@ -8,6 +8,15 @@ app.use(express.json());
 
 app.use("/notification", notificationRoutes);
 
+// Health check endpoint (agregar antes de iniciar el servidor)
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    status: 'ok', 
+    service: 'notification-service', 
+    timestamp: new Date().toISOString() 
+  });
+});
+
 const cors = require('cors');
 app.use(cors());
 
