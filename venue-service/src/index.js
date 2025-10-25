@@ -2,10 +2,23 @@ require("dotenv").config();
 const express = require("express");
 const sequelize = require("./db");
 const venueRoutes = require("./routes/venueRoute");
+const cors = require("cors");
 
 const app = express();
 app.use(express.json());
 //test
+
+const port = process.env.PORT || 3002;
+
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: false
+}));
+
+app.use(express.json());
+
 app.use("/venue", venueRoutes);
 
 // Health check endpoint (agregar antes de iniciar el servidor)
@@ -17,13 +30,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-
-const port = process.env.PORT || 3002;
 
 (async () => {
   try {

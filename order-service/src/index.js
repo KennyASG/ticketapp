@@ -6,6 +6,14 @@ const orderRoutes = require("./routes/orderRoute");
 
 const app = express();
 app.use(express.json());
+const port = process.env.PORT || 3004;
+
+app.use(cors({
+  origin: "*",
+  methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"],
+  allowedHeaders: ["Content-Type","Authorization"],
+  credentials: false
+}));
 
 app.use("/order", orderRoutes);
 
@@ -18,13 +26,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-
-const port = process.env.PORT || 3004;
 
 (async () => {
   try {

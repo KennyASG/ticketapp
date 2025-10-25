@@ -7,6 +7,17 @@ const ticketRoutes = require("./routes/ticketRoute");
 const app = express();
 app.use(express.json());
 
+const port = process.env.PORT || 3003;
+
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: false
+}));
+
+
+
 app.use("/", ticketRoutes);
 
 
@@ -18,13 +29,6 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-}));
-
-const port = process.env.PORT || 3003;
 
 (async () => {
   try {
