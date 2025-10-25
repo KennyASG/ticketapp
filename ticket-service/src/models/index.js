@@ -9,6 +9,7 @@ const StatusGeneral = require("./StatusGeneral");
 const ConcertSeat = require("./ConcertSeat");
 const Seat = require("./Seat");
 const VenueSection = require("./VenueSection");
+const ReservationSeat = require("./ReservationSeat"); // NUEVO
 
 /**
  * DEFINICIÓN DE RELACIONES
@@ -69,6 +70,47 @@ Reservation.belongsTo(StatusGeneral, {
   as: "status",
 });
 
+// ============================================
+// NUEVAS RELACIONES: ReservationSeat
+// ============================================
+
+// Reservation - ReservationSeat (One to Many)
+Reservation.hasMany(ReservationSeat, {
+  foreignKey: "reservation_id",
+  as: "reservation_seats",
+});
+
+ReservationSeat.belongsTo(Reservation, {
+  foreignKey: "reservation_id",
+  as: "reservation",
+});
+
+// Seat - ReservationSeat (One to Many)
+Seat.hasMany(ReservationSeat, {
+  foreignKey: "seat_id",
+  as: "reservation_seats",
+});
+
+ReservationSeat.belongsTo(Seat, {
+  foreignKey: "seat_id",
+  as: "seat",
+});
+
+// ConcertSeat - ReservationSeat (One to Many)
+ConcertSeat.hasMany(ReservationSeat, {
+  foreignKey: "concert_seat_id",
+  as: "reservation_seats",
+});
+
+ReservationSeat.belongsTo(ConcertSeat, {
+  foreignKey: "concert_seat_id",
+  as: "concert_seat",
+});
+
+// ============================================
+// RELACIONES EXISTENTES
+// ============================================
+
 // ConcertSeat - Seat (Many to One)
 ConcertSeat.belongsTo(Seat, {
   foreignKey: "seat_id",
@@ -118,6 +160,7 @@ module.exports = {
   sequelize,
   TicketType,
   Reservation,
+  ReservationSeat, // NUEVO
   Concert,
   User,
   StatusGeneral,

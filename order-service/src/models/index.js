@@ -12,6 +12,7 @@ const TicketType = require("./TicketType");
 const Seat = require("./Seat");
 const StatusGeneral = require("./StatusGeneral");
 const ConcertSeat = require("./ConcertSeat");
+const OrderSeat = require("./OrderSeat"); // NUEVO
 
 /**
  * DEFINICIÓN DE RELACIONES
@@ -204,6 +205,43 @@ StatusGeneral.hasMany(ConcertSeat, {
   as: "concertSeats",
 });
 
+// ============================================
+// NUEVAS RELACIONES: OrderSeat
+// ============================================
+
+// Order - OrderSeat (One to Many)
+Order.hasMany(OrderSeat, {
+  foreignKey: "order_id",
+  as: "order_seats",
+});
+
+OrderSeat.belongsTo(Order, {
+  foreignKey: "order_id",
+  as: "order",
+});
+
+// Seat - OrderSeat (One to Many)
+Seat.hasMany(OrderSeat, {
+  foreignKey: "seat_id",
+  as: "order_seats",
+});
+
+OrderSeat.belongsTo(Seat, {
+  foreignKey: "seat_id",
+  as: "seat",
+});
+
+// ConcertSeat - OrderSeat (One to Many)
+ConcertSeat.hasMany(OrderSeat, {
+  foreignKey: "concert_seat_id",
+  as: "order_seats",
+});
+
+OrderSeat.belongsTo(ConcertSeat, {
+  foreignKey: "concert_seat_id",
+  as: "concert_seat",
+});
+
 // Exportar modelos y sequelize
 module.exports = {
   sequelize,
@@ -218,4 +256,5 @@ module.exports = {
   Seat,
   StatusGeneral,
   ConcertSeat,
+  OrderSeat, // NUEVO
 };
