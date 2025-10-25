@@ -1,0 +1,238 @@
+name: Microservices CI/CD - Intelligent Deploy
+
+on:
+  push:
+    branches: [ "master" ]
+    paths:
+      - 'auth-service/**'
+      - 'concert-service/**'
+      - 'venue-service/**'
+      - 'ticket-service/**'
+      - 'order-service/**'
+      - 'notification-service/**'
+      - 'k8s/**'
+
+jobs:
+  # ============================================
+  # JOB 1: Detectar cambios
+  # ============================================
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      auth: ${{ steps.changes.outputs.auth }}
+      concert: ${{ steps.changes.outputs.concert }}
+      venue: ${{ steps.changes.outputs.venue }}
+      ticket: ${{ steps.changes.outputs.ticket }}
+      order: ${{ steps.changes.outputs.order }}
+      notification: ${{ steps.changes.outputs.notification }}
+      any_changed: ${{ steps.changes.outputs.any_changed }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Check for changes
+        id: changes
+        run: |
+          echo "Detecting changes in microservices..."
+          
+          # Función para detectar cambios
+          check_service() {
+            local service=$1
+            if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q "^${service}-service/"; then
+              echo "${service}=true" >> $GITHUB_OUTPUT
+              echo "${service}-service changed"
+              return 0
+            else
+              echo "${service}=false" >> $GITHUB_OUTPUT
+              echo "${service}-service unchanged"
+              return 1
+            fi
+          }
+          
+          # Verificar cada servicio
+          changed=false
+          check_service "auth" && changed=true
+          check_service "concert" && changed=true
+          check_service "venue" && changed=true
+          check_service "ticket" && changed=true
+          check_service "order" && changed=true
+          check_service "notification" && changed=true
+          
+          echo "any_changed=${changed}" >> $GITHUB_OUTPUT
+          
+          if [ "$changed" = true ]; then
+            echo "Services with changes detected"
+          else
+            echo "No service changes detected"
+          fi
+
+  # ============================================
+  # JOB 2: Build y Push a DockerHub
+  # ============================================
+  build-and-push:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [
+          { name: 'auth', enabled: '${{ needs.detect-changes.outputs.auth }}' },
+          { name: 'concert', enabled: '${{ needs.detect-changes.outputs.concert }}' },
+          { name: 'venue', enabled: '${{ needs.detect-changes.outputs.venue }}' },
+          { name: 'ticket', enabled: '${{ needs.detect-changes.outputs.ticket }}' },
+          { name: 'order', enabled: '${{ needs.detect-changes.outputs.order }}' },
+          { name: 'notification', enabled: '${{ needs.detect-changes.outputs.notification }}' }
+        ]
+    steps:
+      - name: Check if service should build
+        id: should_build
+        run: |
+          if [ "${{ matrix.service.enabled }}" = "true" ]; then
+            echo "build=true" >> $GITHUB_OUTPUT
+            echo "Building ${{ matrix.service.name }}-service"
+          else
+            echo "build=false" >> $GITHUB_OUTPUT
+            echo "Skipping ${{ matrix.service.name }}-service"
+          fi
+
+      - name: Checkout code
+        if: steps.should_build.outputs.build == 'true'
+        uses: actions/checkout@v3
+
+      - name: Set up Docker Buildx
+        if: steps.should_build.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v2
+
+      - name: Log in to DockerHub
+        if: steps.should_build.outputs.build == 'true'
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.should_build.outputs.build == 'true'
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service.name }}-service
+          tags: |
+            type=raw,value=latest
+            type=sha,prefix=,format=short
+
+      - name: Build and push Docker image
+        if: steps.should_build.outputs.build == 'true'
+        uses: docker/build-push-action@v4
+        with:
+          context: ./${{ matrix.service.name }}-service
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.service.name }}-service:latest
+          cache-to: type=inline
+
+      - name: Image build summary
+        if: steps.should_build.outputs.build == 'true'
+        run: |
+          echo "###Docker Image Built" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** ${{ matrix.service.name }}-service" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.meta.outputs.tags }}" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # JOB 3: Deploy a Kubernetes
+  # ============================================
+  deploy:
+    needs: [detect-changes, build-and-push]
+    if: needs.detect-changes.outputs.any_changed == 'true'
+    runs-on: [self-hosted, Linux, X64]
+    strategy:
+      matrix:
+        service: [
+          { name: 'auth', enabled: '${{ needs.detect-changes.outputs.auth }}' },
+          { name: 'concert', enabled: '${{ needs.detect-changes.outputs.concert }}' },
+          { name: 'venue', enabled: '${{ needs.detect-changes.outputs.venue }}' },
+          { name: 'ticket', enabled: '${{ needs.detect-changes.outputs.ticket }}' },
+          { name: 'order', enabled: '${{ needs.detect-changes.outputs.order }}' },
+          { name: 'notification', enabled: '${{ needs.detect-changes.outputs.notification }}' }
+        ]
+    steps:
+      - name: Check if service should deploy
+        id: should_deploy
+        run: |
+          if [ "${{ matrix.service.enabled }}" = "true" ]; then
+            echo "deploy=true" >> $GITHUB_OUTPUT
+            echo "Deploying ${{ matrix.service.name }}-service"
+          else
+            echo "deploy=false" >> $GITHUB_OUTPUT
+            echo "Skipping ${{ matrix.service.name }}-service"
+          fi
+
+      - name: Checkout code
+        if: steps.should_deploy.outputs.deploy == 'true'
+        uses: actions/checkout@v3
+
+      - name: Verify Kubernetes context
+        if: steps.should_deploy.outputs.deploy == 'true'
+        run: |
+          echo "Current context:"
+          kubectl config current-context
+          echo ""
+          echo "Cluster nodes:"
+          kubectl get nodes -o wide
+
+      - name: Apply Kubernetes manifests
+        if: steps.should_deploy.outputs.deploy == 'true'
+        run: |
+          echo "Deploying ${{ matrix.service.name }}-service to Kubernetes..."
+          kubectl apply -f k8s/${{ matrix.service.name }}-service/ -n microservices
+
+      - name: Wait for rollout
+        if: steps.should_deploy.outputs.deploy == 'true'
+        run: |
+          echo "Waiting for ${{ matrix.service.name }}-service rollout..."
+          kubectl rollout status deployment/${{ matrix.service.name }}-service -n microservices --timeout=5m
+
+      - name: Verify deployment
+        if: steps.should_deploy.outputs.deploy == 'true'
+        run: |
+          echo "Verifying ${{ matrix.service.name }}-service deployment..."
+          kubectl get pods -n microservices -l app=${{ matrix.service.name }}-service
+          echo ""
+          echo "Deployment status:"
+          kubectl get deployment/${{ matrix.service.name }}-service -n microservices
+
+      - name: Deployment summary
+        if: steps.should_deploy.outputs.deploy == 'true'
+        run: |
+          echo "###Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** ${{ matrix.service.name }}-service" >> $GITHUB_STEP_SUMMARY
+          echo "**Namespace:** microservices" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:**Deployed successfully" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================
+  # JOB 4: Summary final
+  # ============================================
+  summary:
+    needs: [detect-changes, build-and-push, deploy]
+    if: always() && needs.detect-changes.outputs.any_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate deployment summary
+        run: |
+          echo "# Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Services Deployed:" >> $GITHUB_STEP_SUMMARY
+          
+          [[ "${{ needs.detect-changes.outputs.auth }}" == "true" ]] && echo "- auth-service" >> $GITHUB_STEP_SUMMARY
+          [[ "${{ needs.detect-changes.outputs.concert }}" == "true" ]] && echo "- concert-service" >> $GITHUB_STEP_SUMMARY
+          [[ "${{ needs.detect-changes.outputs.venue }}" == "true" ]] && echo "- venue-service" >> $GITHUB_STEP_SUMMARY
+          [[ "${{ needs.detect-changes.outputs.ticket }}" == "true" ]] && echo "- ticket-service" >> $GITHUB_STEP_SUMMARY
+          [[ "${{ needs.detect-changes.outputs.order }}" == "true" ]] && echo "- order-service" >> $GITHUB_STEP_SUMMARY
+          [[ "${{ needs.detect-changes.outputs.notification }}" == "true" ]] && echo "- notification-service" >> $GITHUB_STEP_SUMMARY
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
