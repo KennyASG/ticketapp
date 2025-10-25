@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const sequelize = require("./db");
+const cors = require("cors");
 const ticketRoutes = require("./routes/ticketRoute");
 
 const app = express();
@@ -8,7 +9,7 @@ app.use(express.json());
 
 app.use("/", ticketRoutes);
 
-// Health check endpoint (agregar antes de iniciar el servidor)
+
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'ok',
