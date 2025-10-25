@@ -1,3 +1,4 @@
+// order-service/src/models/index.js
 const sequelize = require("../db");
 
 // Importar todos los modelos
@@ -6,13 +7,14 @@ const OrderItem = require("./OrderItem");
 const Ticket = require("./Ticket");
 const Payment = require("./Payment");
 const Reservation = require("./Reservation");
+const ReservationSeat = require("./ReservationSeat"); // ✅ AGREGAR ESTO
 const User = require("./User");
 const Concert = require("./Concert");
 const TicketType = require("./TicketType");
 const Seat = require("./Seat");
 const StatusGeneral = require("./StatusGeneral");
 const ConcertSeat = require("./ConcertSeat");
-const OrderSeat = require("./OrderSeat"); // NUEVO
+const OrderSeat = require("./OrderSeat");
 
 /**
  * DEFINICIÓN DE RELACIONES
@@ -206,7 +208,44 @@ StatusGeneral.hasMany(ConcertSeat, {
 });
 
 // ============================================
-// NUEVAS RELACIONES: OrderSeat
+// ✅ NUEVAS RELACIONES: ReservationSeat
+// ============================================
+
+// Reservation - ReservationSeat (One to Many)
+Reservation.hasMany(ReservationSeat, {
+  foreignKey: "reservation_id",
+  as: "reservation_seats",
+});
+
+ReservationSeat.belongsTo(Reservation, {
+  foreignKey: "reservation_id",
+  as: "reservation",
+});
+
+// Seat - ReservationSeat (One to Many)
+Seat.hasMany(ReservationSeat, {
+  foreignKey: "seat_id",
+  as: "reservation_seats",
+});
+
+ReservationSeat.belongsTo(Seat, {
+  foreignKey: "seat_id",
+  as: "seat",
+});
+
+// ConcertSeat - ReservationSeat (One to Many)
+ConcertSeat.hasMany(ReservationSeat, {
+  foreignKey: "concert_seat_id",
+  as: "reservation_seats",
+});
+
+ReservationSeat.belongsTo(ConcertSeat, {
+  foreignKey: "concert_seat_id",
+  as: "concert_seat",
+});
+
+// ============================================
+// RELACIONES: OrderSeat
 // ============================================
 
 // Order - OrderSeat (One to Many)
@@ -250,11 +289,12 @@ module.exports = {
   Ticket,
   Payment,
   Reservation,
+  ReservationSeat, // ✅ AGREGAR ESTO
   User,
   Concert,
   TicketType,
   Seat,
   StatusGeneral,
   ConcertSeat,
-  OrderSeat, // NUEVO
+  OrderSeat,
 };

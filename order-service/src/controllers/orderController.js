@@ -1,12 +1,23 @@
+// order-service/src/controllers/orderController.js
 const orderService = require("../services/orderService");
 
 /**
- * POST /orders
+ * POST /order/
+ * ✅ SIMPLIFICADO: Solo requiere reservation_id
  */
 const createOrder = async (req, res) => {
   try {
     const userId = req.user.id;
-    const result = await orderService.createOrder(userId, req.body);
+    const { reservation_id } = req.body;
+
+    // Validación básica
+    if (!reservation_id) {
+      return res.status(400).json({ 
+        message: "reservation_id es requerido" 
+      });
+    }
+
+    const result = await orderService.createOrder(userId, { reservation_id });
     res.status(201).json(result);
   } catch (error) {
     res.status(400).json({ message: error.message });
@@ -14,7 +25,8 @@ const createOrder = async (req, res) => {
 };
 
 /**
- * POST /orders/:id/confirm
+ * POST /order/:id/confirm
+ * Confirmar orden (procesar pago y generar tickets)
  */
 const confirmOrder = async (req, res) => {
   try {
@@ -28,7 +40,25 @@ const confirmOrder = async (req, res) => {
 };
 
 /**
- * GET /orders/user/:userId
+ * GET /order/:id
+ * Ver detalle de orden
+ */
+const getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+    const isAdmin = req.user.role === 1;
+    
+    const order = await orderService.getOrderById(id, userId, isAdmin);
+    res.status(200).json(order);
+  } catch (error) {
+    res.status(404).json({ message: error.message });
+  }
+};
+
+/**
+ * GET /order/orders/user/:userId
+ * Ver órdenes del usuario
  */
 const getUserOrders = async (req, res) => {
   try {
@@ -47,7 +77,8 @@ const getUserOrders = async (req, res) => {
 };
 
 /**
- * GET /admin/orders
+ * GET /order/admin/orders
+ * Ver todas las órdenes (Admin)
  */
 const getAllOrders = async (req, res) => {
   try {
@@ -59,7 +90,8 @@ const getAllOrders = async (req, res) => {
 };
 
 /**
- * GET /admin/concerts/:id/sales
+ * GET /order/admin/concert/:id/sales
+ * Ver ventas por concierto (Admin)
  */
 const getSalesByConcert = async (req, res) => {
   try {
@@ -68,22 +100,6 @@ const getSalesByConcert = async (req, res) => {
     res.status(200).json(sales);
   } catch (error) {
     res.status(500).json({ message: error.message });
-  }
-};
-
-/**
- * GET /orders/:id
- */
-const getOrderById = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const userId = req.user.id;
-    const isAdmin = req.user.role === 1;
-    
-    const order = await orderService.getOrderById(id, userId, isAdmin);
-    res.status(200).json(order);
-  } catch (error) {
-    res.status(404).json({ message: error.message });
   }
 };
 

@@ -216,7 +216,7 @@ const createReservation = async (userId, data) => {
   try {
     const { concert_id, ticket_type_id, quantity } = data;
 
-    if (!concert_id || !ticket_type_id || !quantity || quantity <= 0) {
+    if (!concert_id || !ticket_type_id || !quantity || quantity <= 0 || quantity > 5) {
       throw new Error("Datos de reserva inválidos");
     }
 
@@ -261,9 +261,14 @@ const createReservation = async (userId, data) => {
     // =============================================
     // 2. VERIFICAR TIPO DE TICKET Y SECCIÓN
     // =============================================
-    const ticketType = await TicketType.findByPk(ticket_type_id, { transaction });
+    const ticketType = await TicketType.findOne({
+      where :{
+        id: ticket_type_id,
+        concert_id
+      }
+    }, { transaction });
     if (!ticketType) {
-      throw new Error("Tipo de ticket no encontrado");
+      throw new Error("Tipo de ticket no encontrado o no asignado a este concierto");
     }
 
     if (!ticketType.section_id) {

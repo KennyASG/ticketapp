@@ -1,3 +1,4 @@
+// order-service/src/services/orderService.js
 const {
   Order,
   OrderItem,
@@ -24,26 +25,44 @@ const generateTicketCode = (orderId, ticketNumber) => {
 };
 
 /**
- * NUEVA VERSIÓN: Crear orden desde reserva con asientos específicos
+ * ✅ VERSIÓN SIMPLIFICADA: Crear orden solo con reservation_id
  */
 const createOrder = async (userId, data) => {
+  const { reservation_id } = data;
+
+  if (!reservation_id) {
+    throw new Error("reservation_id es requerido");
+  }
+
   const transaction = await sequelize.transaction();
 
   try {
-    const { reservation_id, ticket_type_id, quantity } = data;
-
-    if (!reservation_id || !ticket_type_id || !quantity) {
-      throw new Error("Datos de orden inválidos");
-    }
-
     // =============================================
-    // 1. VERIFICAR QUE LA RESERVA EXISTE Y ES DEL USUARIO
+    // 1. OBTENER STATUS NECESARIOS
     // =============================================
     const heldStatus = await StatusGeneral.findOne({
       where: { dominio: "reservation", descripcion: "held" },
       transaction,
     });
 
+    const pendingStatus = await StatusGeneral.findOne({
+      where: { dominio: "order", descripcion: "pending" },
+      transaction,
+    });
+
+    const inCartStatus = await StatusGeneral.findOne({
+      where: { dominio: "seat", descripcion: "in_cart" },
+      transaction,
+    });
+
+    const confirmedReservationStatus = await StatusGeneral.findOne({
+      where: { dominio: "reservation", descripcion: "confirmed" },
+      transaction,
+    });
+
+    // =============================================
+    // 2. OBTENER RESERVA COMPLETA CON TODOS SUS DATOS
+    // =============================================
     const reservation = await Reservation.findOne({
       where: {
         id: reservation_id,
@@ -58,10 +77,12 @@ const createOrder = async (userId, data) => {
             {
               model: Seat,
               as: "seat",
+              attributes: ["id", "seat_number", "section_id"],
             },
             {
               model: ConcertSeat,
               as: "concert_seat",
+              attributes: ["id", "concert_id", "status_id"],
             },
           ],
         },
@@ -69,108 +90,57 @@ const createOrder = async (userId, data) => {
       transaction,
     });
 
+    // =============================================
+    // 3. VALIDACIONES
+    // =============================================
     if (!reservation) {
-      throw new Error("Reserva no encontrada o ya expiró");
+      throw new Error(
+        "Reserva no encontrada, ya expiró o no te pertenece"
+      );
     }
 
-    // =============================================
-    // 2. VERIFICAR QUE NO HAYA EXPIRADO
-    // =============================================
+    // Validar que no haya expirado
     if (new Date() > new Date(reservation.expires_at)) {
-      throw new Error("La reserva ha expirado");
+      throw new Error(
+        `La reserva expiró el ${new Date(reservation.expires_at).toLocaleString()}`
+      );
     }
 
-    // =============================================
-    // 3. VERIFICAR QUE TENGA ASIENTOS RESERVADOS
-    // =============================================
+    // Validar que tenga asientos reservados
     if (!reservation.reservation_seats || reservation.reservation_seats.length === 0) {
       throw new Error("La reserva no tiene asientos asignados");
     }
 
-    if (reservation.reservation_seats.length !== quantity) {
-      throw new Error(
-        `La reserva tiene ${reservation.reservation_seats.length} asientos, pero solicitaste ${quantity}`
-      );
-    }
+    // =============================================
+    // 4. EXTRAER DATOS DE LA RESERVA
+    // =============================================
+    const quantity = reservation.reservation_seats.length;
+    const concertId = reservation.concert_id;
+    
+    // Obtener section_id del primer asiento (todos deberían ser de la misma sección)
+    const sectionId = reservation.reservation_seats[0].seat.section_id;
 
     // =============================================
-    // 4. VALIDAR QUE TODOS LOS ASIENTOS AÚN ESTÉN RESERVED
+    // 5. OBTENER TICKET TYPE BASADO EN CONCIERTO Y SECCIÓN
     // =============================================
-    const reservedStatus = await StatusGeneral.findOne({
-      where: { dominio: "seat", descripcion: "reserved" },
-      transaction,
-    });
-
-    const occupiedStatus = await StatusGeneral.findOne({
-      where: { dominio: "seat", descripcion: "occupied" },
-      transaction,
-    });
-
-    const inCartStatus = await StatusGeneral.findOne({
-      where: { dominio: "seat", descripcion: "in_cart" },
-      transaction,
-    });
-
-    for (const reservationSeat of reservation.reservation_seats) {
-      const concertSeat = reservationSeat.concert_seat;
-
-      // Si el asiento está OCCUPIED, alguien más lo compró
-      if (concertSeat.status_id === occupiedStatus.id) {
-        throw new Error(
-          `El asiento ${reservationSeat.seat.seat_number} ya fue vendido a otro usuario`
-        );
-      }
-
-      // Si el asiento está IN_CART de otro usuario
-      if (concertSeat.status_id === inCartStatus.id) {
-        // Verificar si es de otro usuario
-        const existingOrderSeat = await OrderSeat.findOne({
-          where: { concert_seat_id: concertSeat.id },
-          include: [
-            {
-              model: Order,
-              as: "order",
-              where: { user_id: { [Op.ne]: userId } },
-            },
-          ],
-          transaction,
-        });
-
-        if (existingOrderSeat) {
-          throw new Error(
-            `El asiento ${reservationSeat.seat.seat_number} ya está en el carrito de otro usuario`
-          );
-        }
-      }
-
-      // Si no está RESERVED, algo salió mal
-      if (concertSeat.status_id !== reservedStatus.id) {
-        throw new Error(
-          `El asiento ${reservationSeat.seat.seat_number} no está en estado reservado`
-        );
-      }
-    }
-
-    // =============================================
-    // 5. OBTENER TICKET TYPE Y CALCULAR TOTAL
-    // =============================================
-    const ticketType = await TicketType.findByPk(ticket_type_id, {
+    const ticketType = await TicketType.findOne({
+      where: {
+        concert_id: concertId,
+        section_id: sectionId,
+      },
       transaction,
     });
 
     if (!ticketType) {
-      throw new Error("Tipo de ticket no encontrado");
+      throw new Error(
+        `No se encontró tipo de ticket para el concierto ${concertId} y sección ${sectionId}`
+      );
     }
 
+    // =============================================
+    // 6. CALCULAR TOTAL
+    // =============================================
     const total = ticketType.price * quantity;
-
-    // =============================================
-    // 6. OBTENER STATUS 'PENDING' PARA ORDERS
-    // =============================================
-    const pendingStatus = await StatusGeneral.findOne({
-      where: { dominio: "order", descripcion: "pending" },
-      transaction,
-    });
 
     // =============================================
     // 7. CREAR ORDEN
@@ -178,7 +148,7 @@ const createOrder = async (userId, data) => {
     const order = await Order.create(
       {
         user_id: userId,
-        concert_id: reservation.concert_id,
+        concert_id: concertId,
         status_id: pendingStatus.id,
         total,
       },
@@ -217,12 +187,10 @@ const createOrder = async (userId, data) => {
     // =============================================
     // 10. ACTUALIZAR RESERVATION → CONFIRMED
     // =============================================
-    const confirmedStatus = await StatusGeneral.findOne({
-      where: { dominio: "reservation", descripcion: "confirmed" },
-      transaction,
-    });
-
-    await reservation.update({ status_id: confirmedStatus.id }, { transaction });
+    await reservation.update(
+      { status_id: confirmedReservationStatus.id },
+      { transaction }
+    );
 
     // =============================================
     // 11. CREAR ORDER ITEMS
@@ -230,7 +198,7 @@ const createOrder = async (userId, data) => {
     await OrderItem.create(
       {
         order_id: order.id,
-        ticket_type_id,
+        ticket_type_id: ticketType.id,
         seat_id: null, // Los asientos están en order_seats
         quantity,
         unit_price: ticketType.price,
@@ -239,29 +207,41 @@ const createOrder = async (userId, data) => {
     );
 
     // =============================================
-    // 12. TODO: RABBITMQ - Mover de RESERVA a CARRITO
+    // 12. TODO: RABBITMQ - Publicar en CARRITO_QUEUE
     // =============================================
-    // 1. CONSUMIR (ACK) mensaje de RESERVA_QUEUE con reservationId
-    // 2. PUBLICAR mensaje en CARRITO_QUEUE:
-    // const rabbitMQMessage = {
-    //   orderId: order.id,
-    //   reservationId: reservation.id,
-    //   userId: userId,
-    //   concertId: reservation.concert_id,
-    //   seatIds: reservation.reservation_seats.map(rs => rs.seat_id),
-    //   concertSeatIds: concertSeatIds,
-    //   timestamp: new Date().toISOString(),
-    // };
-    // await consumeFromQueue('RESERVA_QUEUE', reservationId);
-    // await publishToQueue('CARRITO_QUEUE', rabbitMQMessage);
+    /*
+    const rabbitMQMessage = {
+      action: "ORDER_CREATED",
+      orderId: order.id,
+      userId: userId,
+      concertId: concertId,
+      reservationId: reservation_id,
+      ticketTypeId: ticketType.id,
+      quantity: quantity,
+      total: total,
+      seatIds: reservation.reservation_seats.map(rs => rs.seat_id),
+      concertSeatIds: concertSeatIds,
+      sectionId: sectionId,
+      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 min
+      timestamp: new Date().toISOString(),
+    };
+    
+    await publishToQueue("CARRITO_QUEUE", rabbitMQMessage);
+    console.log("📨 Mensaje publicado en CARRITO_QUEUE:", rabbitMQMessage);
+    */
 
     await transaction.commit();
 
     // =============================================
-    // 13. RETORNAR RESPUESTA
+    // 13. RETORNAR RESPUESTA COMPLETA
     // =============================================
     const createdOrder = await Order.findByPk(order.id, {
       include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "name", "email"],
+        },
         {
           model: Concert,
           as: "concert",
@@ -273,13 +253,24 @@ const createOrder = async (userId, data) => {
           attributes: ["descripcion"],
         },
         {
+          model: OrderItem,
+          as: "items",
+          include: [
+            {
+              model: TicketType,
+              as: "ticketType",
+              attributes: ["id", "name", "price"],
+            },
+          ],
+        },
+        {
           model: OrderSeat,
           as: "order_seats",
           include: [
             {
               model: Seat,
               as: "seat",
-              attributes: ["id", "seat_number"],
+              attributes: ["id", "seat_number", "section_id"],
             },
           ],
         },
@@ -287,10 +278,18 @@ const createOrder = async (userId, data) => {
     });
 
     return {
+      message: "Orden creada exitosamente. Procede a confirmar el pago.",
       order: createdOrder,
       total,
-      seats: reservation.reservation_seats.map((rs) => rs.seat.seat_number),
-      message: "Orden creada. Tienes 5 minutos para confirmar el pago.",
+      ticket_type: {
+        id: ticketType.id,
+        name: ticketType.name,
+        price: ticketType.price,
+      },
+      seats: reservation.reservation_seats.map((rs) => ({
+        seat_number: rs.seat.seat_number,
+        section_id: rs.seat.section_id,
+      })),
     };
   } catch (error) {
     await transaction.rollback();
@@ -299,20 +298,43 @@ const createOrder = async (userId, data) => {
 };
 
 /**
- * NUEVA VERSIÓN: Confirmar orden y procesar pago con asientos específicos
+ * Confirmar orden (procesar pago)
  */
 const confirmOrder = async (orderId, userId) => {
   const transaction = await sequelize.transaction();
 
   try {
     // =============================================
-    // 1. VERIFICAR QUE LA ORDEN EXISTE Y ES DEL USUARIO
+    // 1. OBTENER STATUS NECESARIOS
     // =============================================
     const pendingStatus = await StatusGeneral.findOne({
       where: { dominio: "order", descripcion: "pending" },
       transaction,
     });
 
+    const confirmedStatus = await StatusGeneral.findOne({
+      where: { dominio: "order", descripcion: "confirmed" },
+      transaction,
+    });
+
+    const occupiedStatus = await StatusGeneral.findOne({
+      where: { dominio: "seat", descripcion: "occupied" },
+      transaction,
+    });
+
+    const issuedStatus = await StatusGeneral.findOne({
+      where: { dominio: "ticket", descripcion: "issued" },
+      transaction,
+    });
+
+    const capturedStatus = await StatusGeneral.findOne({
+      where: { dominio: "payment", descripcion: "captured" },
+      transaction,
+    });
+
+    // =============================================
+    // 2. OBTENER ORDEN COMPLETA
+    // =============================================
     const order = await Order.findOne({
       where: {
         id: orderId,
@@ -348,50 +370,21 @@ const confirmOrder = async (orderId, userId) => {
       transaction,
     });
 
+    // =============================================
+    // 3. VALIDACIONES
+    // =============================================
     if (!order) {
-      throw new Error("Orden no encontrada o ya fue procesada");
+      throw new Error(
+        "Orden no encontrada, ya fue confirmada o no te pertenece"
+      );
     }
 
-    // =============================================
-    // 2. VERIFICAR QUE TENGA ASIENTOS
-    // =============================================
     if (!order.order_seats || order.order_seats.length === 0) {
       throw new Error("La orden no tiene asientos asignados");
     }
 
     // =============================================
-    // 3. VALIDAR QUE TODOS LOS ASIENTOS ESTÉN IN_CART
-    // =============================================
-    const inCartStatus = await StatusGeneral.findOne({
-      where: { dominio: "seat", descripcion: "in_cart" },
-      transaction,
-    });
-
-    const occupiedStatus = await StatusGeneral.findOne({
-      where: { dominio: "seat", descripcion: "occupied" },
-      transaction,
-    });
-
-    for (const orderSeat of order.order_seats) {
-      const concertSeat = orderSeat.concert_seat;
-
-      // Si ya está OCCUPIED, alguien más lo compró
-      if (concertSeat.status_id === occupiedStatus.id) {
-        throw new Error(
-          `El asiento ${orderSeat.seat.seat_number} ya fue vendido a otro usuario`
-        );
-      }
-
-      // Si no está IN_CART, algo salió mal
-      if (concertSeat.status_id !== inCartStatus.id) {
-        throw new Error(
-          `El asiento ${orderSeat.seat.seat_number} no está en tu carrito`
-        );
-      }
-    }
-
-    // =============================================
-    // 4. ACTUALIZAR CONCERT_SEATS → OCCUPIED (PERMANENTE)
+    // 4. ACTUALIZAR CONCERT_SEATS → OCCUPIED (permanente)
     // =============================================
     const concertSeatIds = order.order_seats.map((os) => os.concert_seat_id);
 
@@ -404,51 +397,42 @@ const confirmOrder = async (orderId, userId) => {
     );
 
     // =============================================
-    // 5. ACTUALIZAR ORDER → CONFIRMED
+    // 5. ACTUALIZAR STATUS DE LA ORDEN → CONFIRMED
     // =============================================
-    const confirmedStatus = await StatusGeneral.findOne({
-      where: { dominio: "order", descripcion: "confirmed" },
-      transaction,
-    });
-
     await order.update({ status_id: confirmedStatus.id }, { transaction });
 
     // =============================================
-    // 6. CREAR TICKETS (uno por cada asiento)
+    // 6. GENERAR TICKETS (uno por asiento)
     // =============================================
-    const issuedStatus = await StatusGeneral.findOne({
-      where: { dominio: "ticket", descripcion: "issued" },
-      transaction,
-    });
-
-    const ticketType = order.items[0].ticketType;
     const tickets = [];
+    const ticketType = order.items[0].ticketType;
 
     for (let i = 0; i < order.order_seats.length; i++) {
       const orderSeat = order.order_seats[i];
+      const ticketCode = generateTicketCode(order.id, i + 1);
 
       const ticket = await Ticket.create(
         {
           order_id: order.id,
           ticket_type_id: ticketType.id,
           seat_id: orderSeat.seat_id,
-          code: generateTicketCode(order.id, i + 1),
+          code: ticketCode,
           status_id: issuedStatus.id,
         },
         { transaction }
       );
 
-      tickets.push(ticket);
+      tickets.push({
+        id: ticket.id,
+        code: ticket.code,
+        seat_number: orderSeat.seat.seat_number,
+        section_id: orderSeat.seat.section_id,
+      });
     }
 
     // =============================================
-    // 7. CREAR REGISTRO DE PAGO (SIMULADO)
+    // 7. CREAR REGISTRO DE PAGO (simulado)
     // =============================================
-    const capturedStatus = await StatusGeneral.findOne({
-      where: { dominio: "payment", descripcion: "captured" },
-      transaction,
-    });
-
     const payment = await Payment.create(
       {
         order_id: order.id,
@@ -460,18 +444,75 @@ const confirmOrder = async (orderId, userId) => {
     );
 
     // =============================================
-    // 8. TODO: RABBITMQ - CONSUMIR DE CARRITO_QUEUE
+    // 8. TODO: RABBITMQ - Consumir mensaje de CARRITO_QUEUE
     // =============================================
-    // await consumeFromQueue('CARRITO_QUEUE', orderId);
-    // Esto marca el mensaje como procesado y no será expirado
+    /*
+    // Este endpoint debería ser disparado por el consumer de RabbitMQ
+    // que escucha CARRITO_QUEUE y procesa pagos
+    
+    await acknowledgeMessage("CARRITO_QUEUE", orderId);
+    console.log("✅ Mensaje consumido de CARRITO_QUEUE para order:", orderId);
+    
+    // Publicar evento de PAGO_COMPLETADO
+    const paymentCompleteMessage = {
+      action: "PAYMENT_COMPLETED",
+      orderId: order.id,
+      userId: userId,
+      concertId: order.concert_id,
+      total: order.total,
+      ticketsGenerated: tickets.length,
+      ticketCodes: tickets.map(t => t.code),
+      timestamp: new Date().toISOString(),
+    };
+    
+    await publishToQueue("NOTIFICATIONS_QUEUE", paymentCompleteMessage);
+    console.log("📨 Mensaje publicado en NOTIFICATIONS_QUEUE:", paymentCompleteMessage);
+    */
 
     await transaction.commit();
 
     // =============================================
-    // 9. RETORNAR RESPUESTA
+    // 9. RETORNAR RESPUESTA COMPLETA
     // =============================================
-    const confirmedOrder = await Order.findByPk(order.id, {
+    return {
+      message: "¡Pago confirmado! Tickets generados exitosamente",
+      order: {
+        id: order.id,
+        status: "confirmed",
+        total: order.total,
+      },
+      tickets,
+      payment: {
+        id: payment.id,
+        provider: payment.provider,
+        amount: payment.amount,
+        status: "captured",
+      },
+    };
+  } catch (error) {
+    await transaction.rollback();
+    throw new Error("Error al confirmar orden: " + error.message);
+  }
+};
+
+/**
+ * Obtener orden por ID
+ */
+const getOrderById = async (orderId, userId, isAdmin) => {
+  try {
+    const whereClause = { id: orderId };
+    if (!isAdmin) {
+      whereClause.user_id = userId;
+    }
+
+    const order = await Order.findOne({
+      where: whereClause,
       include: [
+        {
+          model: User,
+          as: "user",
+          attributes: ["id", "name", "email"],
+        },
         {
           model: Concert,
           as: "concert",
@@ -483,32 +524,59 @@ const confirmOrder = async (orderId, userId) => {
           attributes: ["descripcion"],
         },
         {
-          model: Ticket,
-          as: "tickets",
+          model: OrderItem,
+          as: "items",
+          include: [
+            {
+              model: TicketType,
+              as: "ticketType",
+              attributes: ["id", "name", "price"],
+            },
+          ],
+        },
+        {
+          model: OrderSeat,
+          as: "order_seats",
           include: [
             {
               model: Seat,
               as: "seat",
-              attributes: ["id", "seat_number"],
+              attributes: ["id", "seat_number", "section_id"],
+            },
+          ],
+        },
+        {
+          model: Ticket,
+          as: "tickets",
+          include: [
+            {
+              model: StatusGeneral,
+              as: "status",
+              attributes: ["descripcion"],
             },
           ],
         },
         {
           model: Payment,
           as: "payment",
+          include: [
+            {
+              model: StatusGeneral,
+              as: "status",
+              attributes: ["descripcion"],
+            },
+          ],
         },
       ],
     });
 
-    return {
-      order: confirmedOrder,
-      tickets,
-      payment,
-      message: "Orden confirmada exitosamente",
-    };
+    if (!order) {
+      throw new Error("Orden no encontrada");
+    }
+
+    return order;
   } catch (error) {
-    await transaction.rollback();
-    throw new Error("Error al confirmar orden: " + error.message);
+    throw new Error("Error al obtener orden: " + error.message);
   }
 };
 
@@ -531,24 +599,13 @@ const getUserOrders = async (userId) => {
           attributes: ["descripcion"],
         },
         {
-          model: Ticket,
-          as: "tickets",
+          model: OrderItem,
+          as: "items",
           include: [
             {
-              model: Seat,
-              as: "seat",
-              attributes: ["id", "seat_number"],
-            },
-          ],
-        },
-        {
-          model: OrderSeat,
-          as: "order_seats",
-          include: [
-            {
-              model: Seat,
-              as: "seat",
-              attributes: ["id", "seat_number"],
+              model: TicketType,
+              as: "ticketType",
+              attributes: ["id", "name", "price"],
             },
           ],
         },
@@ -583,10 +640,6 @@ const getAllOrders = async () => {
           model: StatusGeneral,
           as: "status",
           attributes: ["descripcion"],
-        },
-        {
-          model: Ticket,
-          as: "tickets",
         },
       ],
       order: [["created_at", "DESC"]],
@@ -625,7 +678,7 @@ const getSalesByConcert = async (concertId) => {
             {
               model: TicketType,
               as: "ticketType",
-              attributes: ["name", "price"],
+              attributes: ["id", "name", "price"],
             },
           ],
         },
@@ -634,20 +687,19 @@ const getSalesByConcert = async (concertId) => {
           as: "tickets",
         },
       ],
-      order: [["created_at", "ASC"]],
+      order: [["created_at", "DESC"]],
     });
 
-    const totalOrders = orders.length;
-    const totalTickets = orders.reduce(
-      (sum, order) => sum + order.tickets.length,
+    const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
+    const totalTicketsSold = orders.reduce(
+      (sum, order) => sum + (order.tickets?.length || 0),
       0
     );
-    const totalRevenue = orders.reduce((sum, order) => sum + order.total, 0);
 
     return {
       concert_id: concertId,
-      total_orders: totalOrders,
-      total_tickets: totalTickets,
+      total_orders: orders.length,
+      total_tickets_sold: totalTicketsSold,
       total_revenue: totalRevenue,
       orders,
     };
@@ -656,91 +708,11 @@ const getSalesByConcert = async (concertId) => {
   }
 };
 
-/**
- * Obtener orden por ID
- */
-const getOrderById = async (orderId, userId, isAdmin) => {
-  try {
-    const whereClause = { id: orderId };
-
-    // Si no es admin, solo puede ver sus propias órdenes
-    if (!isAdmin) {
-      whereClause.user_id = userId;
-    }
-
-    const order = await Order.findOne({
-      where: whereClause,
-      include: [
-        {
-          model: User,
-          as: "user",
-          attributes: ["id", "name", "email"],
-        },
-        {
-          model: Concert,
-          as: "concert",
-          attributes: ["id", "title", "date"],
-        },
-        {
-          model: StatusGeneral,
-          as: "status",
-          attributes: ["descripcion"],
-        },
-        {
-          model: OrderItem,
-          as: "items",
-          include: [
-            {
-              model: TicketType,
-              as: "ticketType",
-              attributes: ["name", "price"],
-            },
-          ],
-        },
-        {
-          model: Ticket,
-          as: "tickets",
-          include: [
-            {
-              model: Seat,
-              as: "seat",
-              attributes: ["id", "seat_number"],
-            },
-          ],
-        },
-        {
-          model: Payment,
-          as: "payment",
-        },
-        {
-          model: OrderSeat,
-          as: "order_seats",
-          include: [
-            {
-              model: Seat,
-              as: "seat",
-              attributes: ["id", "seat_number"],
-            },
-          ],
-        },
-      ],
-    });
-
-    if (!order) {
-      throw new Error("Orden no encontrada");
-    }
-
-    return order;
-  } catch (error) {
-    throw new Error("Error al obtener orden: " + error.message);
-  }
-};
-
 module.exports = {
   createOrder,
   confirmOrder,
+  getOrderById,
   getUserOrders,
   getAllOrders,
   getSalesByConcert,
-  getOrderById,
 };
