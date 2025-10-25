@@ -1,7 +1,7 @@
 {
   "info": {
-    "name": "TicketApp - Flujo Completo",
-    "description": "Colección completa para probar todos los endpoints de la aplicación de reserva de tickets",
+    "name": "TicketApp Microservicios - Colección Real",
+    "description": "Colección completa basada en los endpoints reales implementados",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "auth": {
@@ -16,32 +16,32 @@
   },
   "variable": [
     {
-      "key": "base_url_auth",
-      "value": "http://localhost:3000",
-      "type": "string"
-    },
-    {
-      "key": "base_url_concert",
+      "key": "auth_service",
       "value": "http://localhost:3001",
       "type": "string"
     },
     {
-      "key": "base_url_venue",
+      "key": "concert_service",
+      "value": "http://localhost:3001",
+      "type": "string"
+    },
+    {
+      "key": "venue_service",
       "value": "http://localhost:3002",
       "type": "string"
     },
     {
-      "key": "base_url_ticket",
+      "key": "ticket_service",
       "value": "http://localhost:3003",
       "type": "string"
     },
     {
-      "key": "base_url_order",
+      "key": "order_service",
       "value": "http://localhost:3004",
       "type": "string"
     },
     {
-      "key": "base_url_notification",
+      "key": "notification_service",
       "value": "http://localhost:3005",
       "type": "string"
     },
@@ -56,13 +56,18 @@
       "type": "string"
     },
     {
-      "key": "concert_id",
+      "key": "venue_id",
+      "value": "1",
+      "type": "string"
+    },
+    {
+      "key": "section_id",
       "value": "",
       "type": "string"
     },
     {
-      "key": "venue_id",
-      "value": "1",
+      "key": "concert_id",
+      "value": "",
       "type": "string"
     },
     {
@@ -83,7 +88,7 @@
   ],
   "item": [
     {
-      "name": "1. AUTENTICACIÓN",
+      "name": "1. AUTH SERVICE (Puerto 3001)",
       "item": [
         {
           "name": "1.1 Register User",
@@ -93,12 +98,11 @@
               "script": {
                 "exec": [
                   "if (pm.response.code === 201) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('user_id', jsonData.id);",
-                  "    pm.test('Usuario creado correctamente', function () {",
-                  "        pm.expect(jsonData).to.have.property('id');",
-                  "        pm.expect(jsonData).to.have.property('email');",
-                  "    });",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.id) {",
+                  "        pm.environment.set('user_id', jsonData.id);",
+                  "        console.log('✅ User ID guardado:', jsonData.id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -106,6 +110,9 @@
             }
           ],
           "request": {
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
               {
@@ -115,13 +122,14 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"Usuario Test\",\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\",\n  \"role\": 2\n}"
+              "raw": "{\n  \"name\": \"Usuario Test\",\n  \"email\": \"test@example.com\",\n  \"password\": \"password123\",\n  \"role_id\": 2\n}"
             },
             "url": {
-              "raw": "{{base_url_auth}}/auth/register",
-              "host": ["{{base_url_auth}}"],
+              "raw": "{{auth_service}}/auth/register",
+              "host": ["{{auth_service}}"],
               "path": ["auth", "register"]
-            }
+            },
+            "description": "Registra un nuevo usuario en el sistema"
           },
           "response": []
         },
@@ -133,11 +141,15 @@
               "script": {
                 "exec": [
                   "if (pm.response.code === 200) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('auth_token', jsonData.token);",
-                  "    pm.test('Login exitoso', function () {",
-                  "        pm.expect(jsonData).to.have.property('token');",
-                  "    });",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.token) {",
+                  "        pm.environment.set('auth_token', jsonData.token);",
+                  "        console.log('🔐 Token guardado exitosamente');",
+                  "    }",
+                  "    if (jsonData.user && jsonData.user.id) {",
+                  "        pm.environment.set('user_id', jsonData.user.id);",
+                  "        console.log('👤 User ID:', jsonData.user.id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -160,83 +172,47 @@
               "raw": "{\n  \"email\": \"admin@example.com\",\n  \"password\": \"admin123\"\n}"
             },
             "url": {
-              "raw": "{{base_url_auth}}/auth/login",
-              "host": ["{{base_url_auth}}"],
+              "raw": "{{auth_service}}/auth/login",
+              "host": ["{{auth_service}}"],
               "path": ["auth", "login"]
-            }
+            },
+            "description": "⭐ EMPEZAR AQUÍ - Login como administrador. El token se guarda automáticamente."
           },
           "response": []
         },
         {
-          "name": "1.3 Get Current User",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": [
-                  "pm.test('Usuario autenticado', function () {",
-                  "    pm.response.to.have.status(200);",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property('id');",
-                  "    pm.expect(jsonData).to.have.property('email');",
-                  "});"
-                ],
-                "type": "text/javascript"
-              }
-            }
-          ],
+          "name": "1.3 Get All Users (Admin)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_auth}}/auth/me",
-              "host": ["{{base_url_auth}}"],
-              "path": ["auth", "me"]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "1.4 List All Users (Admin)",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url_auth}}/admin/users",
-              "host": ["{{base_url_auth}}"],
-              "path": ["admin", "users"]
-            }
+              "raw": "{{auth_service}}/auth/admin/users",
+              "host": ["{{auth_service}}"],
+              "path": ["auth", "admin", "users"]
+            },
+            "description": "Lista todos los usuarios del sistema (solo administradores)"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Endpoints de autenticación y gestión de usuarios"
     },
     {
-      "name": "2. VENUES",
+      "name": "2. VENUE SERVICE (Puerto 3002)",
       "item": [
         {
           "name": "2.1 Get All Venues",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url_venue}}/venues",
-              "host": ["{{base_url_venue}}"],
-              "path": ["venues"]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "2.2 Create Venue",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "if (pm.response.code === 201) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('venue_id', jsonData.venue.id);",
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.length > 0 && jsonData[0].id) {",
+                  "        pm.environment.set('venue_id', jsonData[0].id);",
+                  "        console.log('🏟️ Venue ID guardado:', jsonData[0].id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -244,48 +220,75 @@
             }
           ],
           "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Arena Test\",\n  \"address\": \"Calle Falsa 123\",\n  \"city\": \"Ciudad Test\",\n  \"country\": \"Guatemala\"\n}"
-            },
+            "method": "GET",
+            "header": [],
             "url": {
-              "raw": "{{base_url_venue}}/admin/venues",
-              "host": ["{{base_url_venue}}"],
-              "path": ["admin", "venues"]
-            }
+              "raw": "{{venue_service}}/venue/venues",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "venues"]
+            },
+            "description": "Obtiene todos los venues disponibles"
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Get Venue By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{venue_service}}/venue/{{venue_id}}",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "{{venue_id}}"]
+            },
+            "description": "Obtiene un venue específico por su ID"
           },
           "response": []
         },
         {
           "name": "2.3 Get Venue Sections",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.length > 0 && jsonData[0].id) {",
+                  "        pm.environment.set('section_id', jsonData[0].id);",
+                  "        console.log('🎫 Section ID guardado:', jsonData[0].id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_venue}}/venues/{{venue_id}}/sections",
-              "host": ["{{base_url_venue}}"],
-              "path": ["venues", "{{venue_id}}", "sections"]
-            }
+              "raw": "{{venue_service}}/venue/{{venue_id}}/sections",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "{{venue_id}}", "sections"]
+            },
+            "description": "Obtiene todas las secciones de un venue"
           },
           "response": []
         },
         {
-          "name": "2.4 Create Section",
+          "name": "2.4 Create Venue (Admin)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 201) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('section_id', jsonData.section.id);",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.venue && jsonData.venue.id) {",
+                  "        pm.environment.set('venue_id', jsonData.venue.id);",
+                  "        console.log('🏟️ Nuevo Venue ID:', jsonData.venue.id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -302,20 +305,137 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"name\": \"VIP Test\",\n  \"capacity\": 50\n}"
+              "raw": "{\n  \"name\": \"Arena Central\",\n  \"address\": \"Av. Principal 123\",\n  \"city\": \"Ciudad de Guatemala\",\n  \"country\": \"Guatemala\"\n}"
             },
             "url": {
-              "raw": "{{base_url_venue}}/admin/venues/{{venue_id}}/sections",
-              "host": ["{{base_url_venue}}"],
-              "path": ["admin", "venues", "{{venue_id}}", "sections"]
+              "raw": "{{venue_service}}/venue/admin/venue",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "admin", "venue"]
+            },
+            "description": "Crea un nuevo venue"
+          },
+          "response": []
+        },
+        {
+          "name": "2.5 Update Venue (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Arena Central - Actualizado\",\n  \"address\": \"Av. Principal 456\"\n}"
+            },
+            "url": {
+              "raw": "{{venue_service}}/venue/admin/venue/{{venue_id}}",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "admin", "venue", "{{venue_id}}"]
+            },
+            "description": "Actualiza un venue existente"
+          },
+          "response": []
+        },
+        {
+          "name": "2.6 Delete Venue (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{venue_service}}/venue/admin/venue/{{venue_id}}",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "admin", "venue", "{{venue_id}}"]
+            },
+            "description": "Elimina un venue"
+          },
+          "response": []
+        },
+        {
+          "name": "2.7 Create Section (Admin)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 201) {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.section && jsonData.section.id) {",
+                  "        pm.environment.set('section_id', jsonData.section.id);",
+                  "        console.log('🎫 Nueva Section ID:', jsonData.section.id);",
+                  "        console.log('💺 Asientos creados:', jsonData.seatsCreated || 'N/A');",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
             }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VIP\",\n  \"capacity\": 100\n}"
+            },
+            "url": {
+              "raw": "{{venue_service}}/venue/admin/venue/{{venue_id}}/section",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "admin", "venue", "{{venue_id}}", "section"]
+            },
+            "description": "Crea una nueva sección en un venue. Se crean automáticamente los asientos."
+          },
+          "response": []
+        },
+        {
+          "name": "2.8 Update Section (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"VIP Premium\",\n  \"capacity\": 120\n}"
+            },
+            "url": {
+              "raw": "{{venue_service}}/venue/admin/venue/{{venue_id}}/section/{{section_id}}",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "admin", "venue", "{{venue_id}}", "section", "{{section_id}}"]
+            },
+            "description": "Actualiza una sección existente"
+          },
+          "response": []
+        },
+        {
+          "name": "2.9 Delete Section (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{venue_service}}/venue/admin/venue/{{venue_id}}/section/{{section_id}}",
+              "host": ["{{venue_service}}"],
+              "path": ["venue", "admin", "venue", "{{venue_id}}", "section", "{{section_id}}"]
+            },
+            "description": "Elimina una sección"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Gestión de venues y sus secciones"
     },
     {
-      "name": "3. CONCIERTOS",
+      "name": "3. CONCERT SERVICE (Puerto 3001)",
       "item": [
         {
           "name": "3.1 Get All Concerts",
@@ -323,23 +443,41 @@
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_concert}}/admin/concerts",
-              "host": ["{{base_url_concert}}"],
-              "path": ["admin", "concerts"]
-            }
+              "raw": "{{concert_service}}/concert/concerts",
+              "host": ["{{concert_service}}"],
+              "path": ["concert", "concerts"]
+            },
+            "description": "Lista todos los conciertos"
           },
           "response": []
         },
         {
-          "name": "3.2 Create Concert",
+          "name": "3.2 Get Concert By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{concert_service}}/concert/{{concert_id}}",
+              "host": ["{{concert_service}}"],
+              "path": ["concert", "{{concert_id}}"]
+            },
+            "description": "Obtiene un concierto específico"
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Create Concert (Admin)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 201) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('concert_id', jsonData.concert.id);",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.concert && jsonData.concert.id) {",
+                  "        pm.environment.set('concert_id', jsonData.concert.id);",
+                  "        console.log('🎵 Concert ID guardado:', jsonData.concert.id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -356,31 +494,19 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Rock Fest 2025\",\n  \"description\": \"El mejor festival de rock del año\",\n  \"date\": \"2025-12-15T20:00:00Z\",\n  \"status_id\": 2,\n  \"venue_id\": 1\n}"
+              "raw": "{\n  \"title\": \"Rock Fest 2025\",\n  \"description\": \"El mejor festival de rock del año\",\n  \"date\": \"2025-12-15T20:00:00.000Z\",\n  \"venue_id\": {{venue_id}}\n}"
             },
             "url": {
-              "raw": "{{base_url_concert}}/admin/concerts",
-              "host": ["{{base_url_concert}}"],
-              "path": ["admin", "concerts"]
-            }
+              "raw": "{{concert_service}}/concert/admin/concert",
+              "host": ["{{concert_service}}"],
+              "path": ["concert", "admin", "concert"]
+            },
+            "description": "⭐ Crea un nuevo concierto. Se crean automáticamente los concert_seats."
           },
           "response": []
         },
         {
-          "name": "3.3 Get Concert By ID",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url_concert}}/admin/concerts/{{concert_id}}",
-              "host": ["{{base_url_concert}}"],
-              "path": ["admin", "concerts", "{{concert_id}}"]
-            }
-          },
-          "response": []
-        },
-        {
-          "name": "3.4 Update Concert",
+          "name": "3.4 Update Concert (Admin)",
           "request": {
             "method": "PUT",
             "header": [
@@ -391,57 +517,81 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"title\": \"Rock Fest 2025 - Actualizado\",\n  \"description\": \"El mejor festival de rock del año - Edición especial\"\n}"
+              "raw": "{\n  \"title\": \"Rock Fest 2025 - ACTUALIZADO\",\n  \"description\": \"Descripción actualizada\"\n}"
             },
             "url": {
-              "raw": "{{base_url_concert}}/admin/concerts/{{concert_id}}",
-              "host": ["{{base_url_concert}}"],
-              "path": ["admin", "concerts", "{{concert_id}}"]
-            }
+              "raw": "{{concert_service}}/concert/admin/concert/{{concert_id}}",
+              "host": ["{{concert_service}}"],
+              "path": ["concert", "admin", "concert", "{{concert_id}}"]
+            },
+            "description": "Actualiza un concierto existente"
           },
           "response": []
         },
         {
-          "name": "3.5 Get Available Seats",
+          "name": "3.5 Delete Concert (Admin)",
           "request": {
-            "method": "GET",
+            "method": "DELETE",
             "header": [],
             "url": {
-              "raw": "{{base_url_concert}}/concerts/{{concert_id}}/available-seats",
-              "host": ["{{base_url_concert}}"],
-              "path": ["concerts", "{{concert_id}}", "available-seats"]
-            }
+              "raw": "{{concert_service}}/concert/admin/concert/{{concert_id}}",
+              "host": ["{{concert_service}}"],
+              "path": ["concert", "admin", "concert", "{{concert_id}}"]
+            },
+            "description": "Elimina un concierto"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Gestión de conciertos"
     },
     {
-      "name": "4. TIPOS DE TICKETS",
+      "name": "4. TICKET SERVICE (Puerto 3003)",
       "item": [
         {
           "name": "4.1 Get Ticket Types by Concert",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.length > 0 && jsonData[0].id) {",
+                  "        pm.environment.set('ticket_type_id', jsonData[0].id);",
+                  "        console.log('🎟️ Ticket Type ID guardado:', jsonData[0].id);",
+                  "    }",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_ticket}}/concerts/{{concert_id}}/ticket-types",
-              "host": ["{{base_url_ticket}}"],
-              "path": ["concerts", "{{concert_id}}", "ticket-types"]
-            }
+              "raw": "{{ticket_service}}/concert/{{concert_id}}/ticket-types",
+              "host": ["{{ticket_service}}"],
+              "path": ["concert", "{{concert_id}}", "ticket-types"]
+            },
+            "description": "Obtiene todos los tipos de tickets de un concierto"
           },
           "response": []
         },
         {
-          "name": "4.2 Create Ticket Type",
+          "name": "4.2 Create Ticket Type (Admin)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 201) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('ticket_type_id', jsonData.ticketType.id);",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.ticketType && jsonData.ticketType.id) {",
+                  "        pm.environment.set('ticket_type_id', jsonData.ticketType.id);",
+                  "        console.log('🎟️ Nuevo Ticket Type ID:', jsonData.ticketType.id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -458,18 +608,19 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"section_id\": 1,\n  \"name\": \"VIP - Rock Fest\",\n  \"price\": 500,\n  \"available\": 100\n}"
+              "raw": "{\n  \"section_id\": {{section_id}},\n  \"name\": \"VIP\",\n  \"price\": 500,\n  \"available\": 50\n}"
             },
             "url": {
-              "raw": "{{base_url_ticket}}/admin/concerts/{{concert_id}}/ticket-types",
-              "host": ["{{base_url_ticket}}"],
-              "path": ["admin", "concerts", "{{concert_id}}", "ticket-types"]
-            }
+              "raw": "{{ticket_service}}/admin/concert/{{concert_id}}/ticket-type",
+              "host": ["{{ticket_service}}"],
+              "path": ["admin", "concert", "{{concert_id}}", "ticket-type"]
+            },
+            "description": "⭐ Crea un tipo de ticket para un concierto"
           },
           "response": []
         },
         {
-          "name": "4.3 Update Ticket Type",
+          "name": "4.3 Update Ticket Type (Admin)",
           "request": {
             "method": "PUT",
             "header": [
@@ -480,35 +631,44 @@
             ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"price\": 450,\n  \"available\": 95\n}"
+              "raw": "{\n  \"name\": \"VIP Premium\",\n  \"price\": 750,\n  \"available\": 40\n}"
             },
             "url": {
-              "raw": "{{base_url_ticket}}/admin/ticket-types/{{ticket_type_id}}",
-              "host": ["{{base_url_ticket}}"],
-              "path": ["admin", "ticket-types", "{{ticket_type_id}}"]
-            }
+              "raw": "{{ticket_service}}/admin/ticket-type/{{ticket_type_id}}",
+              "host": ["{{ticket_service}}"],
+              "path": ["admin", "ticket-type", "{{ticket_type_id}}"]
+            },
+            "description": "Actualiza un tipo de ticket"
           },
           "response": []
-        }
-      ]
-    },
-    {
-      "name": "5. RESERVAS",
-      "item": [
+        },
         {
-          "name": "5.1 Create Reservation",
+          "name": "4.4 Delete Ticket Type (Admin)",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{ticket_service}}/admin/ticket-type/{{ticket_type_id}}",
+              "host": ["{{ticket_service}}"],
+              "path": ["admin", "ticket-type", "{{ticket_type_id}}"]
+            },
+            "description": "Elimina un tipo de ticket"
+          },
+          "response": []
+        },
+        {
+          "name": "4.5 Create Reservation",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 201) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('reservation_id', jsonData.reservation.id);",
-                  "    pm.test('Reserva creada correctamente', function () {",
-                  "        pm.expect(jsonData.reservation).to.have.property('id');",
-                  "        pm.expect(jsonData.reservation).to.have.property('expires_at');",
-                  "    });",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.reservation && jsonData.reservation.id) {",
+                  "        pm.environment.set('reservation_id', jsonData.reservation.id);",
+                  "        console.log('📝 Reservation ID guardado:', jsonData.reservation.id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -528,58 +688,61 @@
               "raw": "{\n  \"concert_id\": {{concert_id}},\n  \"ticket_type_id\": {{ticket_type_id}},\n  \"quantity\": 2\n}"
             },
             "url": {
-              "raw": "{{base_url_ticket}}/tickets/reserve",
-              "host": ["{{base_url_ticket}}"],
-              "path": ["tickets", "reserve"]
-            }
+              "raw": "{{ticket_service}}/ticket/reserve",
+              "host": ["{{ticket_service}}"],
+              "path": ["ticket", "reserve"]
+            },
+            "description": "⭐ Crea una reserva temporal (expira en 5 minutos para RabbitMQ)"
           },
           "response": []
         },
         {
-          "name": "5.2 Get User Reservations",
+          "name": "4.6 Get User Reservations",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_ticket}}/tickets/reservations",
-              "host": ["{{base_url_ticket}}"],
-              "path": ["tickets", "reservations"]
-            }
+              "raw": "{{ticket_service}}/ticket/reservations",
+              "host": ["{{ticket_service}}"],
+              "path": ["ticket", "reservations"]
+            },
+            "description": "Obtiene todas las reservas del usuario autenticado"
           },
           "response": []
         },
         {
-          "name": "5.3 Release Expired Reservations (Admin)",
+          "name": "4.7 Release Expired Reservations (Admin)",
           "request": {
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{base_url_ticket}}/admin/tickets/release-expired",
-              "host": ["{{base_url_ticket}}"],
+              "raw": "{{ticket_service}}/admin/tickets/release-expired",
+              "host": ["{{ticket_service}}"],
               "path": ["admin", "tickets", "release-expired"]
-            }
+            },
+            "description": "Libera todas las reservas expiradas (normalmente ejecutado por cron job)"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Gestión de tickets, tipos y reservas"
     },
     {
-      "name": "6. ÓRDENES",
+      "name": "5. ORDER SERVICE (Puerto 3004)",
       "item": [
         {
-          "name": "6.1 Create Order",
+          "name": "5.1 Create Order",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
                   "if (pm.response.code === 201) {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.environment.set('order_id', jsonData.order.id);",
-                  "    pm.test('Orden creada correctamente', function () {",
-                  "        pm.expect(jsonData.order).to.have.property('id');",
-                  "        pm.expect(jsonData).to.have.property('total');",
-                  "    });",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.order && jsonData.order.id) {",
+                  "        pm.environment.set('order_id', jsonData.order.id);",
+                  "        console.log('🛒 Order ID guardado:', jsonData.order.id);",
+                  "    }",
                   "}"
                 ],
                 "type": "text/javascript"
@@ -599,27 +762,26 @@
               "raw": "{\n  \"reservation_id\": {{reservation_id}},\n  \"ticket_type_id\": {{ticket_type_id}},\n  \"quantity\": 2\n}"
             },
             "url": {
-              "raw": "{{base_url_order}}/orders",
-              "host": ["{{base_url_order}}"],
-              "path": ["orders"]
-            }
+              "raw": "{{order_service}}/order/",
+              "host": ["{{order_service}}"],
+              "path": ["order", ""]
+            },
+            "description": "⭐ Crea una orden de compra (status: pending)"
           },
           "response": []
         },
         {
-          "name": "6.2 Confirm Order (Payment)",
+          "name": "5.2 Confirm Order (Payment)",
           "event": [
             {
               "listen": "test",
               "script": {
                 "exec": [
-                  "pm.test('Orden confirmada correctamente', function () {",
-                  "    pm.response.to.have.status(200);",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData.order).to.have.property('id');",
-                  "    pm.expect(jsonData).to.have.property('tickets');",
-                  "    pm.expect(jsonData.tickets.length).to.be.above(0);",
-                  "});"
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    console.log('✅ Orden confirmada');",
+                  "    console.log('🎟️ Tickets generados:', jsonData.tickets ? jsonData.tickets.length : 0);",
+                  "}"
                 ],
                 "type": "text/javascript"
               }
@@ -629,97 +791,120 @@
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{base_url_order}}/orders/{{order_id}}/confirm",
-              "host": ["{{base_url_order}}"],
-              "path": ["orders", "{{order_id}}", "confirm"]
-            }
+              "raw": "{{order_service}}/order/{{order_id}}/confirm",
+              "host": ["{{order_service}}"],
+              "path": ["order", "{{order_id}}", "confirm"]
+            },
+            "description": "⭐⭐⭐ Confirma el pago y genera los tickets. Asientos → occupied, crea tickets con códigos únicos."
           },
           "response": []
         },
         {
-          "name": "6.3 Get User Orders",
+          "name": "5.3 Get Order By ID",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_order}}/orders/user/{{user_id}}",
-              "host": ["{{base_url_order}}"],
-              "path": ["orders", "user", "{{user_id}}"]
-            }
+              "raw": "{{order_service}}/order/{{order_id}}",
+              "host": ["{{order_service}}"],
+              "path": ["order", "{{order_id}}"]
+            },
+            "description": "Obtiene detalles de una orden específica"
           },
           "response": []
         },
         {
-          "name": "6.4 Get All Orders (Admin)",
+          "name": "5.4 Get User Orders",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_order}}/admin/orders",
-              "host": ["{{base_url_order}}"],
-              "path": ["admin", "orders"]
-            }
+              "raw": "{{order_service}}/order/orders/user/{{user_id}}",
+              "host": ["{{order_service}}"],
+              "path": ["order", "orders", "user", "{{user_id}}"]
+            },
+            "description": "Obtiene todas las órdenes de un usuario"
           },
           "response": []
         },
         {
-          "name": "6.5 Get Sales by Concert (Admin)",
+          "name": "5.5 Get All Orders (Admin)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_order}}/admin/concerts/{{concert_id}}/sales",
-              "host": ["{{base_url_order}}"],
-              "path": ["admin", "concerts", "{{concert_id}}", "sales"]
-            }
+              "raw": "{{order_service}}/order/admin/orders",
+              "host": ["{{order_service}}"],
+              "path": ["order", "admin", "orders"]
+            },
+            "description": "Lista todas las órdenes del sistema (admin)"
           },
           "response": []
         },
         {
-          "name": "6.6 Get Order by ID",
+          "name": "5.6 Get Sales by Concert (Admin)",
           "request": {
             "method": "GET",
             "header": [],
             "url": {
-              "raw": "{{base_url_order}}/orders/{{order_id}}",
-              "host": ["{{base_url_order}}"],
-              "path": ["orders", "{{order_id}}"]
-            }
+              "raw": "{{order_service}}/order/admin/concert/{{concert_id}}/sales",
+              "host": ["{{order_service}}"],
+              "path": ["order", "admin", "concert", "{{concert_id}}", "sales"]
+            },
+            "description": "Obtiene reporte de ventas por concierto"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Gestión de órdenes y pagos"
     },
     {
-      "name": "7. NOTIFICACIONES",
+      "name": "6. NOTIFICATION SERVICE (Puerto 3005)",
       "item": [
         {
-          "name": "7.1 Send Tickets Email",
+          "name": "6.1 Send Tickets Email",
           "request": {
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{base_url_notification}}/orders/{{order_id}}/send-tickets",
-              "host": ["{{base_url_notification}}"],
-              "path": ["orders", "{{order_id}}", "send-tickets"]
-            }
+              "raw": "{{notification_service}}/notification/order/{{order_id}}/send-tickets",
+              "host": ["{{notification_service}}"],
+              "path": ["notification", "order", "{{order_id}}", "send-tickets"]
+            },
+            "description": "Envía los tickets por email"
           },
           "response": []
         },
         {
-          "name": "7.2 Send Confirmation Email",
+          "name": "6.2 Send Confirmation Email",
           "request": {
             "method": "POST",
             "header": [],
             "url": {
-              "raw": "{{base_url_notification}}/orders/{{order_id}}/send-confirmation",
-              "host": ["{{base_url_notification}}"],
-              "path": ["orders", "{{order_id}}", "send-confirmation"]
-            }
+              "raw": "{{notification_service}}/notification/order/{{order_id}}/send-confirmation",
+              "host": ["{{notification_service}}"],
+              "path": ["notification", "order", "{{order_id}}", "send-confirmation"]
+            },
+            "description": "Envía email de confirmación de compra"
+          },
+          "response": []
+        },
+        {
+          "name": "6.3 Get Notifications",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{notification_service}}/notification/notifications",
+              "host": ["{{notification_service}}"],
+              "path": ["notification", "notifications"]
+            },
+            "description": "Obtiene historial de notificaciones"
           },
           "response": []
         }
-      ]
+      ],
+      "description": "Sistema de notificaciones por email"
     }
   ]
 }

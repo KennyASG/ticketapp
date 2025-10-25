@@ -1,1017 +1,1109 @@
-# 🧪 GUÍA DE TESTING COMPLETO - TicketApp
+# 🎯 GUÍA DE TESTING REAL - TicketApp Microservicios
 
-## 📋 Tabla de Contenidos
-1. [Prerequisitos](#prerequisitos)
-2. [Configuración Inicial](#configuración-inicial)
-3. [Flujo de Testing](#flujo-de-testing)
-4. [Orden de Ejecución](#orden-de-ejecución)
-5. [Escenarios de Prueba](#escenarios-de-prueba)
-6. [Validaciones por Endpoint](#validaciones-por-endpoint)
-7. [Troubleshooting](#troubleshooting)
+## 📋 ÍNDICE
+1. [Requisitos Previos](#requisitos-previos)
+2. [Arquitectura de Microservicios](#arquitectura-de-microservicios)
+3. [Configuración de Postman](#configuración-de-postman)
+4. [Flujo de Testing Completo](#flujo-de-testing-completo)
+5. [Endpoints por Servicio](#endpoints-por-servicio)
+6. [Escenarios de Prueba](#escenarios-de-prueba)
+7. [Verificación de Base de Datos](#verificación-de-base-de-datos)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
-## 🔧 Prerequisitos
+## ✅ REQUISITOS PREVIOS
 
 ### Software Necesario
-- ✅ PostgreSQL 13+ corriendo
-- ✅ Node.js 16+ instalado
-- ✅ Postman instalado
-- ✅ Base de datos `ticketapp` creada y con `schema.sql` ejecutado
+```bash
+✅ PostgreSQL 13+ corriendo
+✅ Node.js 16+ instalado
+✅ Postman instalado
+✅ Base de datos 'ticketapp' creada
+✅ schema.sql ejecutado
+```
 
 ### Servicios Activos
-Todos los servicios deben estar corriendo en sus puertos respectivos:
+
+Todos los microservicios deben estar corriendo:
+
 ```bash
-# Terminal 1
-cd services/auth-service && npm start        # Puerto 3000
+# Terminal 1 - Auth Service
+cd auth-service
+npm install
+npm start
+# Corre en puerto 3001
 
-# Terminal 2
-cd services/concert-service && npm start     # Puerto 3001
+# Terminal 2 - Venue Service  
+cd venue-service
+npm install
+npm start
+# Corre en puerto 3002
 
-# Terminal 3
-cd services/venue-service && npm start       # Puerto 3002
+# Terminal 3 - Ticket Service
+cd ticket-service
+npm install
+npm start
+# Corre en puerto 3003
 
-# Terminal 4
-cd services/ticket-service && npm start      # Puerto 3003
+# Terminal 4 - Concert Service
+cd concert-service
+npm install
+npm start  
+# Corre en puerto 3001 (mismo que auth, diferentes rutas)
 
-# Terminal 5
-cd services/order-service && npm start       # Puerto 3004
+# Terminal 5 - Order Service
+cd order-service
+npm install
+npm start
+# Corre en puerto 3004
 
-# Terminal 6
-cd services/notification-service && npm start # Puerto 3005
+# Terminal 6 - Notification Service
+cd notification-service
+npm install
+npm start
+# Corre en puerto 3005
 ```
 
-### Variables de Entorno
-Verificar que todos los servicios tengan configurado:
-```env
-DATABASE_URL=postgresql://user:password@localhost:5432/ticketapp
-JWT_SECRET=tu_secret_aqui
-PORT=300X
+### Verificar que los servicios están corriendo
+
+```bash
+# Auth Service
+curl http://localhost:3001/auth/login
+# Debe responder con error (falta body)
+
+# Venue Service  
+curl http://localhost:3002/venue/venues
+# Debe responder con [] o lista de venues
+
+# Ticket Service
+curl http://localhost:3003/concert/1/ticket-types  
+# Debe responder con [] o lista de ticket types
+
+# Order Service
+curl http://localhost:3004/order/admin/orders
+# Debe responder con error de autenticación
+
+# Notification Service
+curl http://localhost:3005/notification/notifications
+# Debe responder con error de autenticación
 ```
 
 ---
 
-## ⚙️ Configuración Inicial
+## 🏗️ ARQUITECTURA DE MICROSERVICIOS
 
-### Paso 1: Importar Colección en Postman
+### Puertos y Base Paths
+
+| Servicio | Puerto | Base Path | Descripción |
+|----------|--------|-----------|-------------|
+| Auth | 3001 | `/auth` | Autenticación y usuarios |
+| Concert | 3001 | `/concert` | Gestión de conciertos |
+| Venue | 3002 | `/venue` | Gestión de venues y secciones |
+| Ticket | 3003 | `/` | Tickets, tipos y reservas |
+| Order | 3004 | `/order` | Órdenes y pagos |
+| Notification | 3005 | `/notification` | Notificaciones por email |
+
+### Variables de Entorno (.env)
+
+Cada servicio debe tener su `.env`:
+
+```env
+# Común para todos
+DATABASE_URL=postgresql://usuario:password@localhost:5432/ticketapp
+JWT_SECRET=supersecret
+
+# Específico por servicio
+PORT=300X  # Según el servicio
+```
+
+---
+
+## ⚙️ CONFIGURACIÓN DE POSTMAN
+
+### Paso 1: Importar Colección
 
 1. Abre Postman
-2. Click en **Import** (esquina superior izquierda)
-3. Arrastra el archivo `TicketApp-Complete-Flow.postman_collection.json`
+2. Click en **Import**
+3. Selecciona `TicketApp-Real-Collection.json`
 4. Click en **Import**
 
-### Paso 2: Configurar Environment
+### Paso 2: Crear Environment
 
-1. En Postman, click en **Environments** (icono de engranaje)
-2. Click en **Create Environment**
+1. Click en **Environments** (⚙️)
+2. Click en **+** (Create Environment)
 3. Nombre: `TicketApp Local`
-4. Agregar variables iniciales:
+4. Agregar variables:
 
-| Variable | Initial Value | Current Value |
-|----------|--------------|---------------|
-| `base_url_auth` | `http://localhost:3000` | `http://localhost:3000` |
-| `base_url_concert` | `http://localhost:3001` | `http://localhost:3001` |
-| `base_url_venue` | `http://localhost:3002` | `http://localhost:3002` |
-| `base_url_ticket` | `http://localhost:3003` | `http://localhost:3003` |
-| `base_url_order` | `http://localhost:3004` | `http://localhost:3004` |
-| `base_url_notification` | `http://localhost:3005` | `http://localhost:3005` |
-| `auth_token` | `` | `` |
-| `user_id` | `` | `` |
-| `concert_id` | `` | `` |
-| `venue_id` | `1` | `1` |
-| `ticket_type_id` | `` | `` |
-| `reservation_id` | `` | `` |
-| `order_id` | `` | `` |
+| Variable | Initial Value | Type |
+|----------|---------------|------|
+| `auth_service` | `http://localhost:3001` | default |
+| `concert_service` | `http://localhost:3001` | default |
+| `venue_service` | `http://localhost:3002` | default |
+| `ticket_service` | `http://localhost:3003` | default |
+| `order_service` | `http://localhost:3004` | default |
+| `notification_service` | `http://localhost:3005` | default |
+| `auth_token` | (vacío) | secret |
+| `user_id` | (vacío) | default |
+| `venue_id` | `1` | default |
+| `section_id` | (vacío) | default |
+| `concert_id` | (vacío) | default |
+| `ticket_type_id` | (vacío) | default |
+| `reservation_id` | (vacío) | default |
+| `order_id` | (vacío) | default |
 
 5. Click en **Save**
-6. Selecciona el environment `TicketApp Local` en el dropdown de la esquina superior derecha
-
-### Paso 3: Verificar Base de Datos
-
-Ejecuta en PostgreSQL:
-```sql
--- Verificar que existan usuarios
-SELECT * FROM users;
-
--- Verificar que existan roles
-SELECT * FROM roles;
-
--- Verificar que existan venues (de schema.sql inicial)
-SELECT * FROM venues;
-
--- Verificar que existan status
-SELECT * FROM status_generales;
-```
-
-**Resultado esperado:**
-- ✅ Al menos 1 usuario admin (email: `admin@example.com`)
-- ✅ 2 roles (admin y user)
-- ✅ Al menos 1 venue
-- ✅ Status para todos los dominios (concert, order, ticket, etc.)
+6. Selecciona el environment en el dropdown superior derecho
 
 ---
 
-## 🎯 Flujo de Testing
+## 🎯 FLUJO DE TESTING COMPLETO
 
-### Diagrama de Flujo
+### Diagrama del Flujo
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    FLUJO COMPLETO                           │
-└─────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────┐
+│                  FLUJO COMPLETO DE TESTING                 │
+└────────────────────────────────────────────────────────────┘
 
-1. AUTENTICACIÓN
-   ├─► Register User (opcional)
-   ├─► Login Admin ─────────────► Obtiene TOKEN
-   └─► Get Current User
+FASE 1: AUTENTICACIÓN (Auth Service - Puerto 3001)
+├─► 1.2 Login Admin ──────────► Obtiene TOKEN
+└─► Variables: auth_token, user_id
 
-2. SETUP INICIAL (Admin)
-   ├─► Create Venue ────────────► venue_id
-   ├─► Create Section ──────────► section_id (con asientos)
-   └─► Get Venue Sections
+FASE 2: SETUP VENUES (Venue Service - Puerto 3002)
+├─► 2.1 Get All Venues ───────► Obtiene venue_id
+├─► 2.3 Get Venue Sections ───► Obtiene section_id
+└─► Variables: venue_id, section_id
 
-3. CREAR CONCIERTO (Admin)
-   ├─► Create Concert ──────────► concert_id + concert_seats
-   ├─► Get Concert By ID
-   ├─► Create Ticket Type ──────► ticket_type_id
-   └─► Get Available Seats
+FASE 3: CREAR CONCIERTO (Concert Service - Puerto 3001)
+├─► 3.3 Create Concert ───────► Crea concierto
+└─► Variables: concert_id
 
-4. PROCESO DE COMPRA (Usuario)
-   ├─► Create Reservation ──────► reservation_id (expira en 15 min)
-   ├─► Create Order ────────────► order_id (status: pending)
-   └─► Confirm Order ───────────► Genera tickets + Pago simulado
+FASE 4: TIPOS DE TICKETS (Ticket Service - Puerto 3003)
+├─► 4.2 Create Ticket Type ───► Define precio y disponibilidad
+└─► Variables: ticket_type_id
 
-5. POST-COMPRA
-   ├─► Get User Orders
-   ├─► Get Order By ID ─────────► Ver tickets generados
-   ├─► Send Tickets Email
-   └─► Send Confirmation Email
+FASE 5: RESERVA (Ticket Service - Puerto 3003)
+├─► 4.5 Create Reservation ───► Reserva temporal (5 min)
+└─► Variables: reservation_id
 
-6. REPORTES (Admin)
-   ├─► Get All Orders
-   └─► Get Sales by Concert
+FASE 6: ORDEN (Order Service - Puerto 3004)
+├─► 5.1 Create Order ─────────► Orden status pending
+├─► 5.2 Confirm Order ────────► Genera tickets
+└─► Variables: order_id
+
+FASE 7: NOTIFICACIONES (Notification Service - Puerto 3005)
+├─► 6.1 Send Tickets Email
+└─► 6.2 Send Confirmation
 ```
 
 ---
 
-## 📝 Orden de Ejecución
+## 📖 ENDPOINTS POR SERVICIO
 
-### FASE 1: Autenticación ⚡ (OBLIGATORIO)
+### 1. AUTH SERVICE (Puerto 3001)
 
-#### 1.1 Login Admin
-**Endpoint:** `POST /auth/login`
+#### Base Path: `/auth`
 
-**Body:**
-```json
+**1.2 Login Admin** ⭐ **EMPEZAR AQUÍ**
+
+```http
+POST http://localhost:3001/auth/login
+Content-Type: application/json
+
 {
   "email": "admin@example.com",
   "password": "admin123"
 }
 ```
 
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response contiene `token`
-- ✅ Token se guarda automáticamente en `{{auth_token}}`
-
-**¿Por qué es importante?**
-> Todos los endpoints subsiguientes requieren el token de autenticación. Este paso es CRÍTICO.
-
-#### 1.2 Get Current User (Opcional)
-**Endpoint:** `GET /auth/me`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response contiene datos del usuario admin
-- ✅ `role_id` = 1 (admin)
-
----
-
-### FASE 2: Setup de Venues (Si usas venues existentes, SKIP)
-
-#### 2.1 Get All Venues
-**Endpoint:** `GET /venues`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response es array de venues
-- ✅ Si hay venues, usar `venue_id` existente
-
-**Decisión:**
-- Si existen venues → Usar ID existente y SKIP a 2.4
-- Si NO existen venues → Continuar con 2.2
-
-#### 2.2 Create Venue (Solo si no hay venues)
-**Endpoint:** `POST /admin/venues`
-
-**Body:**
+**Response:**
 ```json
 {
-  "name": "Arena Test",
-  "address": "Calle Falsa 123",
-  "city": "Ciudad Test",
-  "country": "Guatemala"
+  "token": "eyJhbGc...",
+  "user": {
+    "id": 1,
+    "name": "Admin",
+    "email": "admin@example.com",
+    "role_id": 1
+  }
 }
 ```
 
-**Validaciones:**
-- ✅ Status: 201
-- ✅ Response contiene `venue.id`
-- ✅ `venue_id` se guarda automáticamente
+**Variables guardadas automáticamente:**
+- `auth_token`: Token JWT para autenticación
+- `user_id`: ID del usuario
 
-#### 2.3 Get Venue Sections
-**Endpoint:** `GET /venues/{{venue_id}}/sections`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response es array de secciones
-- ✅ Cada sección tiene `id`, `name`, `capacity`
-
-#### 2.4 Create Section (Solo si el venue no tiene secciones)
-**Endpoint:** `POST /admin/venues/{{venue_id}}/sections`
-
-**Body:**
-```json
-{
-  "name": "VIP Test",
-  "capacity": 50
-}
-```
-
-**Validaciones:**
-- ✅ Status: 201
-- ✅ Response contiene `section.id`
-- ✅ Se crearon 50 asientos automáticamente
-- ✅ Mensaje: "Sección creada con 50 asientos"
-
-**¿Qué pasa internamente?**
-> Al crear una sección, el sistema genera automáticamente N asientos (donde N = capacity) numerados del 1 al N.
-
----
-
-### FASE 3: Crear Concierto 🎵 (OBLIGATORIO)
-
-#### 3.1 Get All Concerts (Opcional)
-**Endpoint:** `GET /admin/concerts`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response es array de conciertos
-- ✅ Cada concierto incluye `status` y `venues`
-
-#### 3.2 Create Concert ⭐ CRÍTICO
-**Endpoint:** `POST /admin/concerts`
-
-**Body:**
-```json
-{
-  "title": "Rock Fest 2025",
-  "description": "El mejor festival de rock del año",
-  "date": "2025-12-15T20:00:00Z",
-  "status_id": 2,
-  "venue_id": 1
-}
-```
-
-**Parámetros importantes:**
-- `status_id`: 2 = "on_sale" (ver tabla `status_generales` donde `dominio='concert'`)
-- `venue_id`: ID del venue donde se realizará
-- `date`: Debe ser fecha futura en formato ISO
-
-**Validaciones:**
-- ✅ Status: 201
-- ✅ Response contiene `concert.id`
-- ✅ `concert_id` se guarda automáticamente
-- ✅ Concierto asociado al venue
-- ✅ Se crearon `concert_seats` automáticamente para todos los asientos del venue
-
-**¿Qué pasa internamente?**
-> 1. Valida que el venue exista
-> 2. Valida que no haya traslape de horarios (±4 horas)
-> 3. Crea el concierto
-> 4. Crea relación `concert_venue_detail`
-> 5. Crea `concert_seats` para TODOS los asientos del venue (status: available)
-
-**Verificación en BD:**
+**Verificación:**
 ```sql
--- Ver concert_seats creados
-SELECT COUNT(*) FROM concert_seats WHERE concert_id = 1;
--- Debe ser igual a la suma de capacidades de todas las secciones del venue
+SELECT * FROM users WHERE email = 'admin@example.com';
 ```
 
-#### 3.3 Get Concert By ID
-**Endpoint:** `GET /admin/concerts/{{concert_id}}`
+---
 
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response incluye:
-  - `status` (objeto con descripción)
-  - `venues` (array con datos del venue)
-  - `venues[0].sections` (secciones del venue)
-  - `ticketTypes` (array, puede estar vacío aún)
+**1.1 Register User**
 
-#### 3.4 Get Available Seats
-**Endpoint:** `GET /concerts/{{concert_id}}/available-seats`
+```http
+POST http://localhost:3001/auth/register
+Content-Type: application/json
 
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response es array agrupado por sección
-- ✅ Cada sección muestra:
-  - `section_name`
-  - `capacity`
-  - `available_seats` (array de asientos disponibles)
+{
+  "name": "Usuario Test",
+  "email": "test@example.com",
+  "password": "password123",
+  "role_id": 2
+}
+```
 
-**Ejemplo de respuesta:**
+---
+
+**1.3 Get All Users (Admin)**
+
+```http
+GET http://localhost:3001/auth/admin/users
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+### 2. VENUE SERVICE (Puerto 3002)
+
+#### Base Path: `/venue`
+
+**2.1 Get All Venues**
+
+```http
+GET http://localhost:3002/venue/venues
+Authorization: Bearer {{auth_token}}
+```
+
+**Response:**
 ```json
 [
   {
-    "section_id": 1,
-    "section_name": "VIP",
-    "capacity": 100,
-    "available_seats": [
-      {"seat_id": 1, "seat_number": 1},
-      {"seat_id": 2, "seat_number": 2},
-      ...
+    "id": 1,
+    "name": "Arena Central",
+    "address": "Av. Principal 123",
+    "city": "Ciudad de Guatemala",
+    "country": "Guatemala",
+    "sections": [
+      {
+        "id": 1,
+        "name": "VIP",
+        "capacity": 100
+      }
     ]
   }
 ]
 ```
 
+**Variables guardadas:**
+- `venue_id`: ID del primer venue encontrado
+
 ---
 
-### FASE 4: Tipos de Tickets 🎫 (OBLIGATORIO)
+**2.3 Get Venue Sections**
 
-#### 4.1 Get Ticket Types by Concert
-**Endpoint:** `GET /concerts/{{concert_id}}/ticket-types`
+```http
+GET http://localhost:3002/venue/{{venue_id}}/sections
+Authorization: Bearer {{auth_token}}
+```
 
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response es array (puede estar vacío)
-
-#### 4.2 Create Ticket Type ⭐ CRÍTICO
-**Endpoint:** `POST /admin/concerts/{{concert_id}}/ticket-types`
-
-**Body:**
+**Response:**
 ```json
+[
+  {
+    "id": 1,
+    "venue_id": 1,
+    "name": "VIP",
+    "capacity": 100,
+    "seats": [
+      {"id": 1, "seat_number": 1},
+      {"id": 2, "seat_number": 2}
+    ]
+  }
+]
+```
+
+**Variables guardadas:**
+- `section_id`: ID de la primera sección
+
+**Verificación:**
+```sql
+-- Ver secciones del venue
+SELECT * FROM venue_sections WHERE venue_id = 1;
+
+-- Ver asientos de la sección
+SELECT COUNT(*) as total_asientos 
+FROM seats 
+WHERE section_id = 1;
+```
+
+---
+
+**2.4 Create Venue (Admin)**
+
+```http
+POST http://localhost:3002/venue/admin/venue
+Authorization: Bearer {{auth_token}}
+Content-Type: application/json
+
+{
+  "name": "Arena Central",
+  "address": "Av. Principal 123",
+  "city": "Ciudad de Guatemala",
+  "country": "Guatemala"
+}
+```
+
+---
+
+**2.7 Create Section (Admin)**
+
+```http
+POST http://localhost:3002/venue/admin/venue/{{venue_id}}/section
+Authorization: Bearer {{auth_token}}
+Content-Type: application/json
+
+{
+  "name": "VIP",
+  "capacity": 100
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Sección creada exitosamente",
+  "section": {
+    "id": 1,
+    "venue_id": 1,
+    "name": "VIP",
+    "capacity": 100
+  },
+  "seatsCreated": 100
+}
+```
+
+**¿Qué pasa internamente?**
+1. Crea la sección en `venue_sections`
+2. Crea 100 registros en `seats` con `seat_number` 1-100
+3. Asocia los asientos a la sección
+
+---
+
+### 3. CONCERT SERVICE (Puerto 3001)
+
+#### Base Path: `/concert`
+
+**3.1 Get All Concerts**
+
+```http
+GET http://localhost:3001/concert/concerts
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+**3.3 Create Concert (Admin)** ⭐
+
+```http
+POST http://localhost:3001/concert/admin/concert
+Authorization: Bearer {{auth_token}}
+Content-Type: application/json
+
+{
+  "title": "Rock Fest 2025",
+  "description": "El mejor festival de rock del año",
+  "date": "2025-12-15T20:00:00.000Z",
+  "venue_id": 1
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Concierto creado exitosamente",
+  "concert": {
+    "id": 1,
+    "title": "Rock Fest 2025",
+    "description": "El mejor festival de rock del año",
+    "date": "2025-12-15T20:00:00.000Z"
+  }
+}
+```
+
+**Variables guardadas:**
+- `concert_id`: ID del concierto creado
+
+**¿Qué pasa internamente?**
+1. Valida que el venue exista
+2. Valida traslape de horarios (±4 horas en el mismo venue)
+3. Crea el concierto en `concerts`
+4. Crea relación en `concert_venue_detail`
+5. Crea `concert_seats` para TODOS los asientos del venue
+
+**Verificación:**
+```sql
+-- Ver concierto creado
+SELECT * FROM concerts WHERE id = 1;
+
+-- Ver relación con venue
+SELECT * FROM concert_venue_detail WHERE concert_id = 1;
+
+-- Ver concert_seats creados
+SELECT COUNT(*) FROM concert_seats WHERE concert_id = 1;
+-- Debe ser igual a la suma de asientos de todas las secciones
+```
+
+---
+
+**3.2 Get Concert By ID**
+
+```http
+GET http://localhost:3001/concert/{{concert_id}}
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+### 4. TICKET SERVICE (Puerto 3003)
+
+#### Base Path: `/` (directamente)
+
+**4.1 Get Ticket Types by Concert**
+
+```http
+GET http://localhost:3003/concert/{{concert_id}}/ticket-types
+```
+
+---
+
+**4.2 Create Ticket Type (Admin)** ⭐
+
+```http
+POST http://localhost:3003/admin/concert/{{concert_id}}/ticket-type
+Authorization: Bearer {{auth_token}}
+Content-Type: application/json
+
 {
   "section_id": 1,
-  "name": "VIP - Rock Fest",
+  "name": "VIP",
   "price": 500,
-  "available": 100
+  "available": 50
 }
 ```
 
-**Parámetros importantes:**
-- `section_id`: ID de la sección del venue (opcional, puede ser `null` para tickets generales)
-- `price`: Precio en la moneda configurada (entero)
-- `available`: Cantidad de tickets disponibles para venta
-
-**Validaciones:**
-- ✅ Status: 201
-- ✅ Response contiene `ticketType.id`
-- ✅ `ticket_type_id` se guarda automáticamente
-- ✅ `available` coincide con lo especificado
-
-**¿Qué pasa internamente?**
-> Se crea un tipo de ticket asociado al concierto. Este tipo de ticket se usará para crear reservas y órdenes.
-
-**Recomendación:**
-> Crear al menos 2 tipos de tickets (ej: VIP y General) para probar diferentes escenarios.
-
-#### 4.3 Update Ticket Type (Opcional)
-**Endpoint:** `PUT /admin/ticket-types/{{ticket_type_id}}`
-
-**Body:**
+**Response:**
 ```json
 {
-  "price": 450,
-  "available": 95
+  "message": "Tipo de ticket creado exitosamente",
+  "ticketType": {
+    "id": 1,
+    "concert_id": 1,
+    "section_id": 1,
+    "name": "VIP",
+    "price": 500,
+    "available": 50
+  }
 }
 ```
 
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Precio y disponibilidad actualizados
+**Variables guardadas:**
+- `ticket_type_id`: ID del tipo de ticket
+
+**Campos importantes:**
+- `section_id`: Sección del venue (puede ser `null` para general)
+- `price`: Precio en entero (ej: 500)
+- `available`: Cantidad de tickets para vender
+
+**Verificación:**
+```sql
+SELECT * FROM ticket_types WHERE concert_id = 1;
+```
 
 ---
 
-### FASE 5: Proceso de Reserva y Compra 🛒 (FLUJO CRÍTICO)
+**4.5 Create Reservation** ⭐⭐
 
-#### 5.1 Create Reservation ⭐ INICIO DEL FLUJO DE COMPRA
-**Endpoint:** `POST /tickets/reserve`
+```http
+POST http://localhost:3003/ticket/reserve
+Authorization: Bearer {{auth_token}}
+Content-Type: application/json
 
-**Body:**
-```json
 {
-  "concert_id": {{concert_id}},
-  "ticket_type_id": {{ticket_type_id}},
+  "concert_id": 1,
+  "ticket_type_id": 1,
   "quantity": 2
 }
 ```
 
-**Validaciones:**
-- ✅ Status: 201
-- ✅ Response contiene:
-  - `reservation.id`
-  - `reservation.expires_at` (15 minutos desde creación)
-  - `quantity` confirmada
-  - `message` indicando tiempo de expiración
-- ✅ `reservation_id` se guarda automáticamente
-
-**¿Qué pasa internamente?**
-> 1. Verifica disponibilidad del ticket type
-> 2. Crea reserva con status "held" que expira en 15 minutos
-> 3. Reduce `available` del ticket type
-> 4. Si el ticket tiene `section_id`, marca asientos como "reserved"
-
-**Verificación en BD:**
-```sql
--- Ver reserva creada
-SELECT * FROM reservations WHERE id = X;
-
--- Ver disponibilidad reducida
-SELECT available FROM ticket_types WHERE id = X;
-
--- Ver asientos reservados (si aplica)
-SELECT COUNT(*) FROM concert_seats 
-WHERE concert_id = X AND status_id = (
-  SELECT id FROM status_generales 
-  WHERE dominio='seat' AND descripcion='reserved'
-);
-```
-
-**⚠️ IMPORTANTE:**
-> La reserva expira en 15 minutos. Después de ese tiempo, se debe ejecutar el endpoint de liberar reservas expiradas.
-
-#### 5.2 Get User Reservations (Opcional)
-**Endpoint:** `GET /tickets/reservations`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response incluye todas las reservas del usuario
-- ✅ Cada reserva muestra:
-  - `concert` (título y fecha)
-  - `status` (descripción: "held", "expired", "confirmed")
-  - `expires_at`
-
-#### 5.3 Create Order ⭐ CREAR ORDEN DE COMPRA
-**Endpoint:** `POST /orders`
-
-**Body:**
+**Response:**
 ```json
 {
-  "reservation_id": {{reservation_id}},
-  "ticket_type_id": {{ticket_type_id}},
-  "quantity": 2
-}
-```
-
-**Validaciones:**
-- ✅ Status: 201
-- ✅ Response contiene:
-  - `order.id`
-  - `total` (price × quantity)
-  - `message`: "Orden creada. Procede a confirmar el pago."
-- ✅ `order_id` se guarda automáticamente
-- ✅ Status de orden: "pending"
-
-**¿Qué pasa internamente?**
-> 1. Verifica que la reserva exista y no haya expirado
-> 2. Verifica que pertenezca al usuario autenticado
-> 3. Calcula total (precio × cantidad)
-> 4. Crea orden con status "pending"
-> 5. Crea order_items asociados
-
-**Verificación en BD:**
-```sql
--- Ver orden creada
-SELECT * FROM orders WHERE id = X;
-
--- Ver items de la orden
-SELECT * FROM order_items WHERE order_id = X;
-```
-
-#### 5.4 Confirm Order ⭐⭐⭐ CONFIRMAR PAGO Y GENERAR TICKETS
-**Endpoint:** `POST /orders/{{order_id}}/confirm`
-
-**Sin body (solo autenticación requerida)**
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response contiene:
-  - `order` con status "confirmed"
-  - `tickets` (array de tickets generados)
-  - Cada ticket tiene `code` único
-  - Si hay asientos asignados, cada ticket tiene `seat_id`
-  - `message`: "Orden confirmada exitosamente"
-
-**¿Qué pasa internamente? (FLUJO COMPLEJO)**
-> 1. Verifica que la orden exista y esté en "pending"
-> 2. **Simula pago:** Crea registro en tabla `payments` con status "captured"
-> 3. **Cambia status de orden:** "pending" → "confirmed"
-> 4. **Genera tickets:**
->    - Crea N tickets (donde N = quantity)
->    - Cada ticket tiene código único: `TKT-{orderId}-{ticketNum}-{timestamp}-{random}`
->    - Status de tickets: "issued"
-> 5. **Asigna asientos (si aplica):**
->    - Obtiene asientos "reserved" de la sección
->    - Asigna cada asiento a un ticket
->    - Cambia status de asientos: "reserved" → "occupied"
-> 6. **Confirma reserva:** status "held" → "confirmed"
-
-**Verificación en BD:**
-```sql
--- Ver orden confirmada
-SELECT * FROM orders WHERE id = X;
-
--- Ver pago registrado
-SELECT * FROM payments WHERE order_id = X;
-
--- Ver tickets generados
-SELECT id, code, seat_id FROM tickets WHERE order_id = X;
-
--- Ver asientos ocupados
-SELECT COUNT(*) FROM concert_seats 
-WHERE concert_id = X AND status_id = (
-  SELECT id FROM status_generales 
-  WHERE dominio='seat' AND descripcion='occupied'
-);
-
--- Ver reserva confirmada
-SELECT * FROM reservations WHERE concert_id = X;
-```
-
-**Ejemplo de respuesta:**
-```json
-{
-  "order": {
+  "message": "Reserva creada. Expira en 5 minutos.",
+  "reservation": {
     "id": 1,
     "user_id": 1,
     "concert_id": 1,
-    "status": {
-      "descripcion": "confirmed"
-    },
-    "total": 1000,
-    "tickets": [
-      {"id": 1, "code": "TKT-1-1-ABC123"},
-      {"id": 2, "code": "TKT-1-2-ABC124"}
-    ]
+    "status_id": 10,
+    "expires_at": "2025-10-24T16:00:00.000Z"
   },
-  "tickets": [
-    {
-      "id": 1,
-      "order_id": 1,
-      "ticket_type_id": 1,
-      "seat_id": 15,
-      "code": "TKT-1-1-ABC123",
-      "status_id": 10
-    },
-    {
-      "id": 2,
-      "order_id": 1,
-      "ticket_type_id": 1,
-      "seat_id": 16,
-      "code": "TKT-1-2-ABC124",
-      "status_id": 10
-    }
-  ],
-  "message": "Orden confirmada exitosamente"
-}
-```
-
----
-
-### FASE 6: Post-Compra y Notificaciones 📧
-
-#### 6.1 Get User Orders
-**Endpoint:** `GET /orders/user/{{user_id}}`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response es array de órdenes del usuario
-- ✅ Cada orden incluye:
-  - `concert` (título y fecha)
-  - `status` (descripción)
-  - `tickets` (array de códigos)
-
-#### 6.2 Get Order By ID
-**Endpoint:** `GET /orders/{{order_id}}`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response incluye:
-  - Datos completos de la orden
-  - `user` (nombre y email)
-  - `concert` (título y fecha)
-  - `items` (detalles de productos comprados)
-  - `tickets` (con códigos y seat_id)
-  - `payment` (datos del pago)
-
-**Este endpoint es útil para:**
-> Mostrar al usuario el detalle completo de su compra, incluyendo los tickets que puede imprimir o descargar.
-
-#### 6.3 Send Tickets Email
-**Endpoint:** `POST /orders/{{order_id}}/send-tickets`
-
-**Sin body (solo autenticación requerida)**
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response contiene:
-  - `success: true`
-  - `notification` (registro de envío)
-  - `message` con email del destinatario
-
-**¿Qué pasa internamente?**
-> 1. Obtiene datos de la orden (usuario, concierto, tickets)
-> 2. (En implementación completa) Genera PDF con los tickets
-> 3. (En implementación completa) Envía email con PDF adjunto
-> 4. Registra notificación en BD con status "sent" o "failed"
-
-**Nota:**
-> La implementación actual registra la notificación pero no envía email real. Debes implementar:
-> - `emailTransporter.js` con configuración de SMTP
-> - `pdfGenerator.js` para generar PDF de tickets
-> - `emailTemplates.js` con plantillas HTML
-
-#### 6.4 Send Confirmation Email
-**Endpoint:** `POST /orders/{{order_id}}/send-confirmation`
-
-**Sin body (solo autenticación requerida)**
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response similar a 6.3
-
-**Diferencia con 6.3:**
-> - 6.3 envía los tickets (PDF adjunto)
-> - 6.4 envía confirmación de compra (resumen de orden)
-
----
-
-### FASE 7: Reportes y Administración 📊
-
-#### 7.1 Get All Orders (Admin)
-**Endpoint:** `GET /admin/orders`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response incluye:
-  - Array de todas las órdenes
-  - Cada orden con `user`, `concert`, `status`
-  - `pagination` (total, page, totalPages)
-
-**Query params opcionales:**
-- `page`: Número de página (default: 1)
-- `limit`: Items por página (default: 20)
-
-#### 7.2 Get Sales by Concert (Admin)
-**Endpoint:** `GET /admin/concerts/{{concert_id}}/sales`
-
-**Validaciones:**
-- ✅ Status: 200
-- ✅ Response incluye:
-  - `concert_id`
-  - `total_orders`: Total de órdenes confirmadas
-  - `total_tickets`: Total de tickets vendidos
-  - `total_revenue`: Suma de ingresos
-  - `orders`: Array detallado de cada orden
-
-**Ejemplo de respuesta:**
-```json
-{
-  "concert_id": 1,
-  "total_orders": 5,
-  "total_tickets": 12,
-  "total_revenue": 6000,
-  "orders": [
-    {
-      "id": 1,
-      "user": {
-        "id": 2,
-        "name": "Juan Pérez",
-        "email": "juan@example.com"
-      },
-      "total": 1000,
-      "tickets_count": 2,
-      "items": [
-        {
-          "ticketType": {
-            "name": "VIP - Rock Fest",
-            "price": 500
-          }
-        }
-      ],
-      "created_at": "2025-01-15T10:30:00Z"
-    }
+  "quantity": 2,
+  "seats": [
+    {"seat_id": 1, "seat_number": 1},
+    {"seat_id": 2, "seat_number": 2}
   ]
 }
 ```
 
-**Utilidad:**
-> Dashboard de ventas por concierto para análisis financiero y de audiencia.
+**Variables guardadas:**
+- `reservation_id`: ID de la reserva
+
+**¿Qué pasa internamente?**
+1. Valida que el usuario no tenga más de 5 asientos reservados
+2. Verifica disponibilidad del ticket type
+3. Selecciona asientos disponibles de la sección
+4. Crea reserva con `expires_at` = NOW() + 5 minutos
+5. Crea `reservation_seats` para cada asiento
+6. Actualiza `concert_seats` status → "reserved"
+7. Reduce `available` del ticket type
+8. **TODO**: Publica mensaje en RabbitMQ (RESERVA_QUEUE)
+
+**Verificación:**
+```sql
+-- Ver reserva
+SELECT * FROM reservations WHERE id = 1;
+
+-- Ver asientos reservados
+SELECT * FROM reservation_seats WHERE reservation_id = 1;
+
+-- Ver concert_seats marcados como reserved
+SELECT cs.*, s.seat_number, sg.descripcion
+FROM concert_seats cs
+JOIN seats s ON s.id = cs.seat_id
+JOIN status_generales sg ON sg.id = cs.status_id
+WHERE cs.concert_id = 1 
+  AND sg.descripcion = 'reserved';
+
+-- Ver disponibilidad reducida
+SELECT available FROM ticket_types WHERE id = 1;
+```
 
 ---
 
-## 🎭 Escenarios de Prueba
+**4.6 Get User Reservations**
+
+```http
+GET http://localhost:3003/ticket/reservations
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+**4.7 Release Expired Reservations (Admin)**
+
+```http
+POST http://localhost:3003/admin/tickets/release-expired
+Authorization: Bearer {{auth_token}}
+```
+
+**Response:**
+```json
+{
+  "message": "3 reservas expiradas liberadas",
+  "released_reservations": 3
+}
+```
+
+**¿Qué hace?**
+1. Busca reservas con `expires_at < NOW()` y status "held"
+2. Actualiza `concert_seats` status → "available"
+3. Actualiza reserva status → "expired"
+4. Elimina `reservation_seats`
+5. Restaura `available` del ticket type
+
+---
+
+### 5. ORDER SERVICE (Puerto 3004)
+
+#### Base Path: `/order`
+
+**5.1 Create Order** ⭐
+
+```http
+POST http://localhost:3004/order/
+Authorization: Bearer {{auth_token}}
+Content-Type: application/json
+
+{
+  "reservation_id": 1,
+  "ticket_type_id": 1,
+  "quantity": 2
+}
+```
+
+**Response:**
+```json
+{
+  "message": "Orden creada. Procede a confirmar el pago.",
+  "order": {
+    "id": 1,
+    "user_id": 1,
+    "concert_id": 1,
+    "reservation_id": 1,
+    "status_id": 15,
+    "total": 1000
+  },
+  "total": 1000
+}
+```
+
+**Variables guardadas:**
+- `order_id`: ID de la orden
+
+**¿Qué pasa internamente?**
+1. Valida que la reserva existe y no ha expirado
+2. Valida que pertenece al usuario autenticado
+3. Calcula total (precio × cantidad)
+4. Crea orden con status "pending"
+5. Crea `order_items` con los detalles
+6. Copia `reservation_seats` → `order_seats`
+7. **TODO**: Publica mensaje en RabbitMQ (CARRITO_QUEUE)
+
+**Verificación:**
+```sql
+-- Ver orden creada
+SELECT * FROM orders WHERE id = 1;
+
+-- Ver items
+SELECT * FROM order_items WHERE order_id = 1;
+
+-- Ver asientos de la orden
+SELECT * FROM order_seats WHERE order_id = 1;
+```
+
+---
+
+**5.2 Confirm Order (Payment)** ⭐⭐⭐ **MÁS IMPORTANTE**
+
+```http
+POST http://localhost:3004/order/{{order_id}}/confirm
+Authorization: Bearer {{auth_token}}
+```
+
+**Response:**
+```json
+{
+  "message": "Orden confirmada exitosamente",
+  "order": {
+    "id": 1,
+    "status": {"descripcion": "confirmed"},
+    "total": 1000
+  },
+  "tickets": [
+    {
+      "id": 1,
+      "code": "TCK-1-1-A3F9G2",
+      "seat": {"seat_number": 1},
+      "status": "issued"
+    },
+    {
+      "id": 2,
+      "code": "TCK-1-2-B7H4K8",
+      "seat": {"seat_number": 2},
+      "status": "issued"
+    }
+  ],
+  "payment": {
+    "id": 1,
+    "provider": "mock",
+    "amount": 1000,
+    "status": "captured"
+  }
+}
+```
+
+**¿Qué pasa internamente?** (PROCESO CRÍTICO)
+1. Valida que la orden existe y está en "pending"
+2. Valida que pertenece al usuario
+3. **Inicia transacción**
+4. Copia `reservation_seats` → `order_seats`
+5. Actualiza `concert_seats` status → **"occupied"** (PERMANENTE)
+6. Actualiza orden status → **"confirmed"**
+7. **Genera tickets** (uno por asiento)
+   - Crea registro en `tickets`
+   - Genera código único: `TCK-{orderId}-{index}-{random}`
+   - Asigna status "issued"
+8. Crea registro de pago simulado en `payments`
+   - Provider: "mock"
+   - Status: "captured"
+9. **TODO**: Consume mensaje de RabbitMQ (CARRITO_QUEUE)
+10. **Commit transacción**
+
+**Verificación:**
+```sql
+-- Orden confirmada
+SELECT o.*, sg.descripcion as status
+FROM orders o
+JOIN status_generales sg ON sg.id = o.status_id
+WHERE o.id = 1;
+-- status debe ser 'confirmed'
+
+-- Tickets generados
+SELECT * FROM tickets WHERE order_id = 1;
+-- Debe haber 2 tickets con códigos únicos
+
+-- Asientos ocupados
+SELECT cs.*, s.seat_number, sg.descripcion
+FROM concert_seats cs
+JOIN seats s ON s.id = cs.seat_id
+JOIN status_generales sg ON sg.id = cs.status_id
+WHERE cs.id IN (
+  SELECT concert_seat_id FROM order_seats WHERE order_id = 1
+);
+-- status debe ser 'occupied'
+
+-- Pago registrado
+SELECT * FROM payments WHERE order_id = 1;
+-- provider='mock', status='captured'
+```
+
+---
+
+**5.3 Get Order By ID**
+
+```http
+GET http://localhost:3004/order/{{order_id}}
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+**5.4 Get User Orders**
+
+```http
+GET http://localhost:3004/order/orders/user/{{user_id}}
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+**5.5 Get All Orders (Admin)**
+
+```http
+GET http://localhost:3004/order/admin/orders
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+**5.6 Get Sales by Concert (Admin)**
+
+```http
+GET http://localhost:3004/order/admin/concert/{{concert_id}}/sales
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+### 6. NOTIFICATION SERVICE (Puerto 3005)
+
+#### Base Path: `/notification`
+
+**6.1 Send Tickets Email**
+
+```http
+POST http://localhost:3005/notification/order/{{order_id}}/send-tickets
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+**6.2 Send Confirmation Email**
+
+```http
+POST http://localhost:3005/notification/order/{{order_id}}/send-confirmation
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+**6.3 Get Notifications**
+
+```http
+GET http://localhost:3005/notification/notifications
+Authorization: Bearer {{auth_token}}
+```
+
+---
+
+## 🧪 ESCENARIOS DE PRUEBA
 
 ### Escenario 1: Flujo Feliz Completo ✅
 
-**Objetivo:** Usuario compra tickets exitosamente
+**Objetivo:** Compra exitosa de tickets de principio a fin
 
-**Pasos:**
-1. ✅ Login como admin → Obtiene token
-2. ✅ Crear concierto con venue existente → concert_id
-3. ✅ Crear tipo de ticket → ticket_type_id
-4. ✅ Login como usuario regular (o usar mismo admin)
-5. ✅ Crear reserva → reservation_id
-6. ✅ Crear orden → order_id
-7. ✅ Confirmar orden → Tickets generados
-8. ✅ Enviar tickets por email
-9. ✅ Verificar orden en "Get User Orders"
+**Secuencia:**
+```
+1. Login Admin (1.2)
+2. Get All Venues (2.1)
+3. Get Venue Sections (2.3)
+4. Create Concert (3.3)
+5. Create Ticket Type (4.2)
+6. Create Reservation (4.5)
+7. Create Order (5.1)
+8. Confirm Order (5.2)
+9. Get Order By ID (5.3)
+10. Send Tickets Email (6.1)
+```
 
 **Resultado esperado:**
-- Orden confirmada con status "confirmed"
-- Tickets generados con códigos únicos
-- Asientos asignados (si aplica)
-- Notificación registrada
+- ✅ Todos los endpoints responden 200/201
+- ✅ Tickets generados con códigos únicos
+- ✅ Asientos marcados como "occupied"
+- ✅ Pago registrado como "captured"
 
 ---
 
 ### Escenario 2: Reserva Expirada ⏰
 
-**Objetivo:** Probar que las reservas expiran correctamente
+**Objetivo:** Probar liberación de reservas expiradas
 
 **Pasos:**
-1. ✅ Crear reserva normal
-2. ⏳ Esperar 16 minutos (o cambiar manualmente `expires_at` en BD)
-3. ❌ Intentar crear orden con reserva expirada
-4. ✅ Ejecutar "Release Expired Reservations"
-5. ✅ Verificar que:
-   - Reserva cambió a status "expired"
-   - Disponibilidad de tickets se restauró
-   - Asientos liberados (status vuelve a "available")
-
-**Resultado esperado:**
-- Error al crear orden: "La reserva ha expirado"
-- Después de liberar: Tickets disponibles nuevamente
-
-**Verificación en BD:**
-```sql
--- Forzar expiración (para testing rápido)
-UPDATE reservations 
-SET expires_at = NOW() - INTERVAL '1 minute' 
-WHERE id = X;
-
--- Verificar expiración
-SELECT * FROM reservations WHERE id = X;
-
--- Verificar tickets disponibles restaurados
-SELECT available FROM ticket_types WHERE id = X;
-```
+1. Create Reservation (4.5)
+2. Esperar 6 minutos O ejecutar:
+   ```sql
+   UPDATE reservations 
+   SET expires_at = NOW() - INTERVAL '1 minute' 
+   WHERE id = 1;
+   ```
+3. Release Expired Reservations (4.7)
+4. Verificar:
+   - Reserva status → "expired"
+   - Asientos → "available"
+   - Ticket type available restaurado
 
 ---
 
-### Escenario 3: Traslape de Horarios 🚫
-
-**Objetivo:** Probar validación de traslape de conciertos
-
-**Pasos:**
-1. ✅ Crear concierto en venue 1, fecha: 2025-12-15 20:00
-2. ❌ Intentar crear otro concierto en venue 1, fecha: 2025-12-15 21:00
-   (Dentro de 4 horas del primero)
-3. ✅ Verificar error de traslape
-
-**Resultado esperado:**
-- Error 400: "Traslape de horario detectado con el concierto..."
-
-**Casos válidos:**
-- Mismo venue, diferencia > 4 horas: ✅ Permitido
-- Diferente venue, misma hora: ✅ Permitido
-
----
-
-### Escenario 4: Sin Disponibilidad 📉
+### Escenario 3: Sin Disponibilidad 📉
 
 **Objetivo:** Probar manejo de tickets agotados
 
 **Pasos:**
-1. ✅ Crear ticket type con `available: 2`
-2. ✅ Crear reserva de 2 tickets → Éxito
-3. ❌ Intentar crear otra reserva de 1 ticket
-4. ✅ Verificar error de disponibilidad
-
-**Resultado esperado:**
-- Error: "Solo hay 0 tickets disponibles"
+1. Create Ticket Type con `available: 2`
+2. Create Reservation de 2 tickets → ✅ Éxito
+3. Create Reservation de 1 ticket → ❌ Error
+4. Verificar mensaje: "Solo hay 0 tickets disponibles"
 
 ---
 
-### Escenario 5: Múltiples Usuarios 👥
+### Escenario 4: Traslape de Horarios 🚫
 
-**Objetivo:** Probar concurrencia básica
+**Objetivo:** Validar traslape de conciertos
 
 **Pasos:**
-1. ✅ Crear 2 usuarios diferentes
-2. ✅ Ambos intentan reservar los últimos 5 tickets
-3. ✅ Primero que ejecute reserva → Éxito
-4. ❌ Segundo que ejecute reserva → Error de disponibilidad
+1. Create Concert: fecha 2025-12-15 20:00, venue 1 → ✅
+2. Create Concert: fecha 2025-12-15 21:30, venue 1 → ❌
+3. Verificar error: "Traslape de horario detectado"
 
-**Resultado esperado:**
-- Solo un usuario logra reservar
-- Sistema maneja correctamente la concurrencia
+**Regla:** ±4 horas en el mismo venue
 
 ---
 
-## ✅ Validaciones por Endpoint
+### Escenario 5: Límite de 5 Reservas 🚫
 
-### Validaciones Generales (Todos los Endpoints)
+**Objetivo:** Validar límite de asientos por usuario
 
-| Validación | Esperado |
-|------------|----------|
-| **Headers** | `Content-Type: application/json` |
-| **Auth** | `Authorization: Bearer {{auth_token}}` (excepto login/register) |
-| **Response** | JSON válido |
-| **Errores** | `{ "message": "..." }` |
-
-### Validaciones Específicas
-
-#### POST /auth/login
-- ✅ Token es string no vacío
-- ✅ Token tiene formato JWT (3 partes separadas por puntos)
-- ✅ User contiene `id`, `name`, `email`, `role`
-
-#### POST /admin/concerts
-- ✅ `concert_id` es número entero
-- ✅ Concierto tiene relación con venue
-- ✅ En BD: `concert_seats` creados = total asientos del venue
-- ✅ Fecha del concierto es futura
-
-#### POST /tickets/reserve
-- ✅ `expires_at` es 15 minutos después de `created_at`
-- ✅ `available` del ticket type se redujo por `quantity`
-- ✅ Si hay `section_id`, asientos marcados como "reserved"
-
-#### POST /orders/{{order_id}}/confirm
-- ✅ Tickets generados = `quantity` especificada
-- ✅ Cada `code` es único en toda la tabla
-- ✅ Status de orden: "confirmed"
-- ✅ Existe registro en `payments`
-- ✅ Si hay asientos, cada ticket tiene `seat_id` asignado
-- ✅ Asientos cambiaron a "occupied"
+**Pasos:**
+1. Create Reservation: 2 tickets → Total: 2
+2. Create Reservation: 2 tickets → Total: 4  
+3. Create Reservation: 2 tickets → ❌ Error
+4. Verificar: "Tienes 4 asientos reservados. Máximo: 5"
 
 ---
 
-## 🐛 Troubleshooting
+## 🔍 VERIFICACIÓN DE BASE DE DATOS
+
+### Ver estructura completa
+
+```sql
+-- Ver todas las tablas
+\dt
+
+-- Ver usuarios
+SELECT * FROM users;
+
+-- Ver roles
+SELECT * FROM roles;
+
+-- Ver status
+SELECT dominio, descripcion FROM status_generales ORDER BY dominio;
+
+-- Ver venues con secciones
+SELECT v.*, COUNT(vs.id) as total_secciones
+FROM venues v
+LEFT JOIN venue_sections vs ON vs.venue_id = v.id
+GROUP BY v.id;
+
+-- Ver conciertos con venues
+SELECT c.*, v.name as venue_name
+FROM concerts c
+JOIN concert_venue_detail cvd ON cvd.concert_id = c.id
+JOIN venues v ON v.id = cvd.venue_id;
+```
+
+### Verificar reserva activa
+
+```sql
+SELECT 
+  r.id,
+  r.expires_at,
+  sg.descripcion as status,
+  u.email,
+  c.title as concert,
+  COUNT(rs.id) as asientos
+FROM reservations r
+JOIN status_generales sg ON sg.id = r.status_id
+JOIN users u ON u.id = r.user_id
+JOIN concerts c ON c.id = r.concert_id
+LEFT JOIN reservation_seats rs ON rs.reservation_id = r.id
+WHERE r.id = 1
+GROUP BY r.id, r.expires_at, sg.descripcion, u.email, c.title;
+```
+
+### Verificar orden confirmada
+
+```sql
+SELECT 
+  o.id,
+  o.total,
+  sg.descripcion as status,
+  COUNT(DISTINCT t.id) as tickets_generados,
+  p.provider,
+  p.amount as pago
+FROM orders o
+JOIN status_generales sg ON sg.id = o.status_id
+LEFT JOIN tickets t ON t.order_id = o.id
+LEFT JOIN payments p ON p.order_id = o.id
+WHERE o.id = 1
+GROUP BY o.id, o.total, sg.descripcion, p.provider, p.amount;
+```
+
+---
+
+## 🐛 TROUBLESHOOTING
 
 ### Error: "Token inválido o expirado"
 
-**Causa:** Token expiró o no se está enviando correctamente
-
 **Solución:**
-1. Ejecutar nuevamente "Login Admin"
-2. Verificar que `{{auth_token}}` tenga valor en environment
-3. Verificar que el header `Authorization` esté presente
+1. Re-ejecutar Login Admin (1.2)
+2. Verificar que se guardó: `{{auth_token}}` en Postman
+3. Verificar header: `Authorization: Bearer {{auth_token}}`
 
 ---
 
-### Error: "Venue no encontrado"
+### Error: "Solo hay 0 tickets disponibles"
 
-**Causa:** El `venue_id` no existe en BD
+**Causas:**
+1. Reservas no liberadas
+2. Tickets agotados
 
 **Solución:**
-```sql
--- Ver venues disponibles
-SELECT * FROM venues;
-
--- Usar un ID existente o crear uno nuevo
+```
+1. Ejecutar Release Expired Reservations (4.7)
+2. Verificar: SELECT available FROM ticket_types WHERE id = X;
 ```
 
 ---
 
 ### Error: "Traslape de horario detectado"
 
-**Causa:** Ya existe concierto en ese venue dentro de ±4 horas
-
 **Solución:**
-- Usar fecha diferente (> 4 horas de diferencia)
-- Usar venue diferente
+- Cambiar fecha (>4 horas de diferencia)
+- Usar otro venue
 - Eliminar concierto conflictivo
 
 ---
 
-### Error: "Solo hay 0 tickets disponibles"
+### Concert seats no se crearon
 
-**Causa:** Tickets agotados o reservas no liberadas
-
-**Solución:**
-1. Ejecutar "Release Expired Reservations"
-2. Verificar `available` del ticket type:
+**Verificación:**
 ```sql
-   SELECT available FROM ticket_types WHERE id = X;
+SELECT COUNT(*) FROM concert_seats WHERE concert_id = 1;
 ```
-3. Si es 0, actualizar manualmente:
+
+**Causa:** Venue sin secciones/asientos
+
+**Solución:**
+1. Create Section (2.7) para el venue
+2. Volver a crear el concierto
+
+---
+
+### Orden no genera tickets
+
+**Verificación:**
 ```sql
-   UPDATE ticket_types SET available = 100 WHERE id = X;
+SELECT * FROM tickets WHERE order_id = 1;
 ```
 
----
-
-### Error: "La reserva ha expirado"
-
-**Causa:** Pasaron más de 15 minutos desde la reserva
+**Causa:** Error en la transacción
 
 **Solución:**
-1. Crear nueva reserva
-2. Confirmar orden dentro de 15 minutos
-3. Para testing: Extender tiempo de expiración en código
+1. Ver logs del servidor
+2. Verificar status_generales tiene dominios: ticket, payment
+3. Reintentar confirmación
 
 ---
 
-### Error de Conexión a Servicio
+## ✅ CHECKLIST FINAL
 
-**Causa:** Servicio no está corriendo
+Antes de dar por completado:
 
-**Solución:**
-1. Verificar que todos los servicios estén activos:
+**Base de Datos:**
+- [ ] Usuario admin existe
+- [ ] Al menos 1 venue con secciones
+- [ ] Asientos creados para las secciones
+- [ ] Status_generales poblado
+
+**Servicios:**
+- [ ] Todos los 6 servicios corriendo
+- [ ] Conexión a BD funcionando
+- [ ] Sin errores en logs
+
+**Flujo:**
+- [ ] Login funciona
+- [ ] Crear concierto genera concert_seats
+- [ ] Crear tipo de ticket exitoso
+- [ ] Reserva crea reservation_seats
+- [ ] Confirmar orden genera tickets
+- [ ] Códigos de tickets únicos
+
+---
+
+## 📞 AYUDA ADICIONAL
+
+**Ver logs de servicios:**
 ```bash
-   # Revisar procesos de Node
-   ps aux | grep node
-   
-   # O verificar puertos
-   lsof -i :3000
-   lsof -i :3001
-   # ... etc
+# En cada terminal donde corre el servicio
+# Los errores aparecerán aquí
 ```
 
-2. Reiniciar servicio problemático:
-```bash
-   cd services/XXX-service
-   npm start
+**Reiniciar base de datos:**
+```sql
+-- CUIDADO: Borra todo
+DROP DATABASE ticketapp;
+CREATE DATABASE ticketapp;
+\c ticketapp
+\i schema.sql
 ```
 
----
-
-### Variables de Environment No Se Actualizan
-
-**Causa:** Postman no ejecutó el script de test
-
-**Solución:**
-1. En cada request, ir a tab "Tests"
-2. Verificar que exista código como:
-```javascript
-   pm.environment.set('concert_id', jsonData.concert.id);
-```
-3. Ejecutar request
-4. Verificar en Environment que la variable tenga valor
+**Recursos:**
+- GitHub del proyecto
+- Documentación de PostgreSQL
+- Postman Learning Center
 
 ---
 
-## 📊 Checklist Final
-
-### Antes de Empezar
-- [ ] PostgreSQL corriendo
-- [ ] Base de datos `ticketapp` creada
-- [ ] `schema.sql` ejecutado
-- [ ] Todos los servicios corriendo (6 puertos)
-- [ ] Colección importada en Postman
-- [ ] Environment configurado
-
-### Flujo Completo
-- [ ] Login exitoso (token obtenido)
-- [ ] Concierto creado con venue
-- [ ] Ticket type creado
-- [ ] Reserva creada (expira en 15 min)
-- [ ] Orden creada (status pending)
-- [ ] Orden confirmada (tickets generados)
-- [ ] Notificaciones enviadas
-- [ ] Reportes funcionando
-
-### Validaciones en BD
-- [ ] `concert_seats` creados para el concierto
-- [ ] `tickets` generados con códigos únicos
-- [ ] `payments` registrado
-- [ ] `reservations` confirmada
-- [ ] Asientos en status "occupied"
-
----
-
-## 🎉 ¡Felicidades!
-
-Si llegaste aquí y todos los checks están verdes, tu aplicación está funcionando correctamente con:
-
-✅ Sequelize ORM 100%
-✅ Sin queries SQL quemadas
-✅ Relaciones bien definidas
-✅ Transacciones correctas
-✅ Flujo completo de reserva → orden → tickets
-
----
-
-## 📞 Soporte
-
-Si encuentras algún problema no cubierto en esta guía:
-1. Revisar logs de cada servicio
-2. Verificar BD directamente con queries SQL
-3. Usar Postman Console para ver requests/responses completos
-4. Revisar que environment variables estén correctas
-
-**Happy Testing!** 🚀
+🎉 **¡Listo para testing!** Empieza con el endpoint **1.2 Login Admin** y sigue la secuencia.
