@@ -20,7 +20,9 @@ app.get('/health', (req, res) => {
 const port = process.env.PORT || 3000;
 
 const cors = require('cors');
-app.use(cors());
+app.use(cors({
+  origin: '*',  
+}));
 
 (async () => {
   try {
