@@ -1,5 +1,5 @@
 
-const { publishToQueue } = require("../../../ticket-service/src/workers/rabbitClient.cjs");
+// const { publishToQueue } = require("../../../ticket-service/src/workers/rabbitClient.cjs");
 const orderService = require("../services/orderService");
 
 /**
