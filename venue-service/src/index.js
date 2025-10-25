@@ -5,7 +5,7 @@ const venueRoutes = require("./routes/venueRoute");
 
 const app = express();
 app.use(express.json());
-
+//test
 app.use("/venue", venueRoutes);
 
 // Health check endpoint (agregar antes de iniciar el servidor)
