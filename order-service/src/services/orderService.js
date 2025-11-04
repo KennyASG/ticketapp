@@ -16,6 +16,8 @@ const {
   sequelize,
 } = require("../models");
 const { Op } = require("sequelize");
+const { publishToQueue } = require('../workers/rabbitClient');
+const { checkSeatsInQueue, removeSeatsFromQueue } = require('../utils/queueHelpers');
 
 // Función para generar código único de ticket
 const generateTicketCode = (orderId, ticketNumber) => {
@@ -27,62 +29,35 @@ const generateTicketCode = (orderId, ticketNumber) => {
 /**
  * ✅ VERSIÓN SIMPLIFICADA: Crear orden solo con reservation_id
  */
-const createOrder = async (userId, data) => {
-  const { reservation_id } = data;
-
-  if (!reservation_id) {
-    throw new Error("reservation_id es requerido");
-  }
-
+const createOrder = async (userId, { reservation_id }) => {
   const transaction = await sequelize.transaction();
 
   try {
     // =============================================
-    // 1. OBTENER STATUS NECESARIOS
-    // =============================================
-    const heldStatus = await StatusGeneral.findOne({
-      where: { dominio: "reservation", descripcion: "held" },
-      transaction,
-    });
-
-    const pendingStatus = await StatusGeneral.findOne({
-      where: { dominio: "order", descripcion: "pending" },
-      transaction,
-    });
-
-    const inCartStatus = await StatusGeneral.findOne({
-      where: { dominio: "seat", descripcion: "in_cart" },
-      transaction,
-    });
-
-    const confirmedReservationStatus = await StatusGeneral.findOne({
-      where: { dominio: "reservation", descripcion: "confirmed" },
-      transaction,
-    });
-
-    // =============================================
-    // 2. OBTENER RESERVA COMPLETA CON TODOS SUS DATOS
+    // 1. VALIDAR RESERVA (INCLUDE COMPLETO)
     // =============================================
     const reservation = await Reservation.findOne({
-      where: {
-        id: reservation_id,
-        user_id: userId,
-        status_id: heldStatus.id,
-      },
+      where: { id: reservation_id, user_id: userId },
       include: [
         {
           model: ReservationSeat,
           as: "reservation_seats",
           include: [
-            {
-              model: Seat,
+            { 
+              model: Seat, 
               as: "seat",
-              attributes: ["id", "seat_number", "section_id"],
+              attributes: ["id", "seat_number", "section_id"]  // ✅ Incluir section_id
             },
-            {
-              model: ConcertSeat,
+            { 
+              model: ConcertSeat, 
               as: "concert_seat",
-              attributes: ["id", "concert_id", "status_id"],
+              include: [
+                {
+                  model: Seat,
+                  as: "seat",
+                  attributes: ["id", "seat_number", "section_id"]  // ✅ También aquí
+                }
+              ]
             },
           ],
         },
@@ -90,65 +65,93 @@ const createOrder = async (userId, data) => {
       transaction,
     });
 
-    // =============================================
-    // 3. VALIDACIONES
-    // =============================================
     if (!reservation) {
-      throw new Error(
-        "Reserva no encontrada, ya expiró o no te pertenece"
-      );
+      throw new Error("Reserva no encontrada");
     }
 
-    // Validar que no haya expirado
     if (new Date() > new Date(reservation.expires_at)) {
+      throw new Error("La reserva ha expirado");
+    }
+
+    const activeStatus = await StatusGeneral.findOne({
+      where: { dominio: "reservation", descripcion: "held" },
+      transaction,
+    });
+
+    if (reservation.status_id !== activeStatus.id) {
+      throw new Error("La reserva no está activa");
+    }
+
+    // Obtener seat_ids de la reserva
+    const seatIds = reservation.reservation_seats.map(rs => rs.seat_id);
+    const concertSeatIds = reservation.reservation_seats.map(rs => rs.concert_seat_id);
+
+    // =============================================
+    // 🆕 VALIDAR QUE NO ESTÉ EN carrito
+    // =============================================
+    console.log('🔍 [RabbitMQ] Verificando disponibilidad en carrito...');
+    
+    const queueStatus = await checkSeatsInQueue('carrito', seatIds);
+    
+    if (!queueStatus.canProceed) {
+      await transaction.rollback();
       throw new Error(
-        `La reserva expiró el ${new Date(reservation.expires_at).toLocaleString()}`
+        `Los siguientes asientos ya están en proceso de pago: ${queueStatus.inQueue.join(', ')}. ` +
+        `No se puede crear otra orden con estos asientos.`
       );
     }
+    
+    console.log('✅ [RabbitMQ] Asientos disponibles para crear orden');
 
-    // Validar que tenga asientos reservados
-    if (!reservation.reservation_seats || reservation.reservation_seats.length === 0) {
-      throw new Error("La reserva no tiene asientos asignados");
+    // =============================================
+    // 2. OBTENER CONCIERTO
+    // =============================================
+    const concert = await Concert.findByPk(reservation.concert_id, { transaction });
+    if (!concert) {
+      throw new Error("Concierto no encontrado");
     }
 
     // =============================================
-    // 4. EXTRAER DATOS DE LA RESERVA
+    // 3. OBTENER TICKET TYPE (USANDO SECTION_ID DEL PRIMER ASIENTO)
     // =============================================
-    const quantity = reservation.reservation_seats.length;
-    const concertId = reservation.concert_id;
+    // ✅ CORREGIDO: Obtener section_id directamente del seat
+    const firstSeat = reservation.reservation_seats[0]?.seat;
     
-    // Obtener section_id del primer asiento (todos deberían ser de la misma sección)
-    const sectionId = reservation.reservation_seats[0].seat.section_id;
+    if (!firstSeat || !firstSeat.section_id) {
+      throw new Error("No se pudo obtener la sección de los asientos reservados");
+    }
 
-    // =============================================
-    // 5. OBTENER TICKET TYPE BASADO EN CONCIERTO Y SECCIÓN
-    // =============================================
     const ticketType = await TicketType.findOne({
       where: {
-        concert_id: concertId,
-        section_id: sectionId,
+        concert_id: reservation.concert_id,
+        section_id: firstSeat.section_id,  // ✅ Ahora section_id está definido
       },
       transaction,
     });
 
     if (!ticketType) {
-      throw new Error(
-        `No se encontró tipo de ticket para el concierto ${concertId} y sección ${sectionId}`
-      );
+      throw new Error("Tipo de ticket no encontrado para esta sección");
     }
 
     // =============================================
-    // 6. CALCULAR TOTAL
+    // 4. CALCULAR TOTAL
     // =============================================
+    const quantity = reservation.reservation_seats.length;
     const total = ticketType.price * quantity;
 
     // =============================================
-    // 7. CREAR ORDEN
+    // 5. CREAR ORDEN
     // =============================================
+    const pendingStatus = await StatusGeneral.findOne({
+      where: { dominio: "order", descripcion: "pending" },
+      transaction,
+    });
+
     const order = await Order.create(
       {
         user_id: userId,
-        concert_id: concertId,
+        concert_id: reservation.concert_id,
+        reservation_id: reservation_id,
         status_id: pendingStatus.id,
         total,
       },
@@ -156,7 +159,20 @@ const createOrder = async (userId, data) => {
     );
 
     // =============================================
-    // 8. CREAR ORDER_SEATS (copiar de reservation_seats)
+    // 6. CREAR ORDER_ITEMS
+    // =============================================
+    await OrderItem.create(
+      {
+        order_id: order.id,
+        ticket_type_id: ticketType.id,
+        quantity,
+        unit_price: ticketType.price,
+      },
+      { transaction }
+    );
+
+    // =============================================
+    // 7. CREAR ORDER_SEATS
     // =============================================
     for (const reservationSeat of reservation.reservation_seats) {
       await OrderSeat.create(
@@ -169,255 +185,155 @@ const createOrder = async (userId, data) => {
       );
     }
 
-    // =============================================
-    // 9. ACTUALIZAR CONCERT_SEATS → IN_CART
-    // =============================================
-    const concertSeatIds = reservation.reservation_seats.map(
-      (rs) => rs.concert_seat_id
-    );
-
-    await ConcertSeat.update(
-      { status_id: inCartStatus.id },
-      {
-        where: { id: concertSeatIds },
-        transaction,
-      }
-    );
-
-    // =============================================
-    // 10. ACTUALIZAR RESERVATION → CONFIRMED
-    // =============================================
-    await reservation.update(
-      { status_id: confirmedReservationStatus.id },
-      { transaction }
-    );
-
-    // =============================================
-    // 11. CREAR ORDER ITEMS
-    // =============================================
-    await OrderItem.create(
-      {
-        order_id: order.id,
-        ticket_type_id: ticketType.id,
-        seat_id: null, // Los asientos están en order_seats
-        quantity,
-        unit_price: ticketType.price,
-      },
-      { transaction }
-    );
-
-    // =============================================
-    // 12. TODO: RABBITMQ - Publicar en CARRITO_QUEUE
-    // =============================================
-    /*
-    const rabbitMQMessage = {
-      action: "ORDER_CREATED",
-      orderId: order.id,
-      userId: userId,
-      concertId: concertId,
-      reservationId: reservation_id,
-      ticketTypeId: ticketType.id,
-      quantity: quantity,
-      total: total,
-      seatIds: reservation.reservation_seats.map(rs => rs.seat_id),
-      concertSeatIds: concertSeatIds,
-      sectionId: sectionId,
-      expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 min
-      timestamp: new Date().toISOString(),
-    };
-    
-    await publishToQueue("CARRITO_QUEUE", rabbitMQMessage);
-    console.log("📨 Mensaje publicado en CARRITO_QUEUE:", rabbitMQMessage);
-    */
-
     await transaction.commit();
 
     // =============================================
-    // 13. RETORNAR RESPUESTA COMPLETA
+    // 🆕 OPERACIONES CON RABBITMQ (DESPUÉS DE COMMIT)
     // =============================================
-    const createdOrder = await Order.findByPk(order.id, {
-      include: [
-        {
-          model: User,
-          as: "user",
-          attributes: ["id", "name", "email"],
-        },
-        {
-          model: Concert,
-          as: "concert",
-          attributes: ["id", "title", "date"],
-        },
-        {
-          model: StatusGeneral,
-          as: "status",
-          attributes: ["descripcion"],
-        },
-        {
-          model: OrderItem,
-          as: "items",
-          include: [
-            {
-              model: TicketType,
-              as: "ticketType",
-              attributes: ["id", "name", "price"],
-            },
-          ],
-        },
-        {
-          model: OrderSeat,
-          as: "order_seats",
-          include: [
-            {
-              model: Seat,
-              as: "seat",
-              attributes: ["id", "seat_number", "section_id"],
-            },
-          ],
-        },
-      ],
-    });
+    
+    // 1️⃣ LIBERAR DE reserva
+    try {
+      console.log('🗑️ [RabbitMQ] Liberando asientos de reserva...');
+      const removeResult = await removeSeatsFromQueue(
+        'reserva',
+        seatIds,
+        reservation_id
+      );
+      console.log(`✅ [RabbitMQ] ${removeResult.removed} reservas liberadas de reserva`);
+    } catch (error) {
+      console.error('⚠️ [RabbitMQ] Error liberando de reserva:', error);
+    }
 
+    // 2️⃣ PUBLICAR EN carrito
+    try {
+      const cartMessage = {
+        action: "ORDER_CREATED",
+        orderId: order.id,
+        userId: userId,
+        concertId: reservation.concert_id,
+        reservationId: reservation_id,
+        seatIds: seatIds,
+        concertSeatIds: concertSeatIds,
+        ticketTypeId: ticketType.id,
+        quantity: quantity,
+        total: total,
+        timestamp: new Date().toISOString(),
+      };
+
+      await publishToQueue('carrito', cartMessage);
+      console.log('✅ [RabbitMQ] Orden publicada en carrito');
+    } catch (error) {
+      console.error('⚠️ [RabbitMQ] Error publicando en carrito:', error);
+    }
+
+    // =============================================
+    // 8. RETORNAR RESPUESTA
+    // =============================================
     return {
-      message: "Orden creada exitosamente. Procede a confirmar el pago.",
-      order: createdOrder,
-      total,
-      ticket_type: {
-        id: ticketType.id,
-        name: ticketType.name,
-        price: ticketType.price,
+      message: "Orden creada. Procede a confirmar el pago.",
+      order: {
+        id: order.id,
+        user_id: userId,
+        concert_id: reservation.concert_id,
+        reservation_id: reservation_id,
+        status_id: pendingStatus.id,
+        total,
       },
-      seats: reservation.reservation_seats.map((rs) => ({
-        seat_number: rs.seat.seat_number,
-        section_id: rs.seat.section_id,
-      })),
+      total,
     };
   } catch (error) {
     await transaction.rollback();
-    throw new Error("Error al crear orden: " + error.message);
+    throw error;
   }
-};
+}
 
 /**
  * Confirmar orden (procesar pago)
  */
+// ================================================
+// ORDER SERVICE - CONFIRM ORDER
+// ================================================
+
 const confirmOrder = async (orderId, userId) => {
   const transaction = await sequelize.transaction();
 
   try {
-    // =============================================
-    // 1. OBTENER STATUS NECESARIOS
-    // =============================================
+    const order = await Order.findOne({
+      where: { id: orderId },
+      include: [
+        {
+          model: OrderSeat,
+          as: "order_seats",
+          include: [
+            { model: Seat, as: "seat" },
+            { model: ConcertSeat, as: "concert_seat" },
+          ],
+        },
+        {
+          model: OrderItem,
+          as: "items",  // ✅ CORREGIDO: es "items", no "order_items"
+        },
+      ],
+      transaction,
+    });
+
+    if (!order) {
+      throw new Error("Orden no encontrada");
+    }
+
+    if (order.user_id !== userId) {
+      throw new Error("No tienes permiso para confirmar esta orden");
+    }
+
     const pendingStatus = await StatusGeneral.findOne({
       where: { dominio: "order", descripcion: "pending" },
       transaction,
     });
 
-    const confirmedStatus = await StatusGeneral.findOne({
-      where: { dominio: "order", descripcion: "confirmed" },
-      transaction,
-    });
+    if (order.status_id !== pendingStatus.id) {
+      throw new Error("La orden ya fue procesada");
+    }
+
+    const seatIds = order.order_seats.map(os => os.seat_id);
 
     const occupiedStatus = await StatusGeneral.findOne({
       where: { dominio: "seat", descripcion: "occupied" },
       transaction,
     });
 
-    const issuedStatus = await StatusGeneral.findOne({
+    for (const orderSeat of order.order_seats) {
+      await ConcertSeat.update(
+        { status_id: occupiedStatus.id },
+        { where: { id: orderSeat.concert_seat_id }, transaction }
+      );
+    }
+
+    const confirmedStatus = await StatusGeneral.findOne({
+      where: { dominio: "order", descripcion: "confirmed" },
+      transaction,
+    });
+
+    await order.update({ status_id: confirmedStatus.id }, { transaction });
+
+    const issuedTicketStatus = await StatusGeneral.findOne({
       where: { dominio: "ticket", descripcion: "issued" },
       transaction,
     });
 
-    const capturedStatus = await StatusGeneral.findOne({
-      where: { dominio: "payment", descripcion: "captured" },
-      transaction,
-    });
-
-    // =============================================
-    // 2. OBTENER ORDEN COMPLETA
-    // =============================================
-    const order = await Order.findOne({
-      where: {
-        id: orderId,
-        user_id: userId,
-        status_id: pendingStatus.id,
-      },
-      include: [
-        {
-          model: OrderSeat,
-          as: "order_seats",
-          include: [
-            {
-              model: Seat,
-              as: "seat",
-            },
-            {
-              model: ConcertSeat,
-              as: "concert_seat",
-            },
-          ],
-        },
-        {
-          model: OrderItem,
-          as: "items",
-          include: [
-            {
-              model: TicketType,
-              as: "ticketType",
-            },
-          ],
-        },
-      ],
-      transaction,
-    });
-
-    // =============================================
-    // 3. VALIDACIONES
-    // =============================================
-    if (!order) {
-      throw new Error(
-        "Orden no encontrada, ya fue confirmada o no te pertenece"
-      );
-    }
-
-    if (!order.order_seats || order.order_seats.length === 0) {
-      throw new Error("La orden no tiene asientos asignados");
-    }
-
-    // =============================================
-    // 4. ACTUALIZAR CONCERT_SEATS → OCCUPIED (permanente)
-    // =============================================
-    const concertSeatIds = order.order_seats.map((os) => os.concert_seat_id);
-
-    await ConcertSeat.update(
-      { status_id: occupiedStatus.id },
-      {
-        where: { id: concertSeatIds },
-        transaction,
-      }
-    );
-
-    // =============================================
-    // 5. ACTUALIZAR STATUS DE LA ORDEN → CONFIRMED
-    // =============================================
-    await order.update({ status_id: confirmedStatus.id }, { transaction });
-
-    // =============================================
-    // 6. GENERAR TICKETS (uno por asiento)
-    // =============================================
     const tickets = [];
-    const ticketType = order.items[0].ticketType;
+    let ticketIndex = 1;
 
-    for (let i = 0; i < order.order_seats.length; i++) {
-      const orderSeat = order.order_seats[i];
-      const ticketCode = generateTicketCode(order.id, i + 1);
+    for (const orderSeat of order.order_seats) {
+      const randomCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+      const ticketCode = `TCK-${order.id}-${ticketIndex}-${randomCode}`;
 
       const ticket = await Ticket.create(
         {
           order_id: order.id,
-          ticket_type_id: ticketType.id,
+          ticket_type_id: order.items[0]?.ticket_type_id,  // ✅ CORREGIDO: order.items
           seat_id: orderSeat.seat_id,
           code: ticketCode,
-          status_id: issuedStatus.id,
+          status_id: issuedTicketStatus.id,
         },
         { transaction }
       );
@@ -425,14 +341,18 @@ const confirmOrder = async (orderId, userId) => {
       tickets.push({
         id: ticket.id,
         code: ticket.code,
-        seat_number: orderSeat.seat.seat_number,
-        section_id: orderSeat.seat.section_id,
+        seat: { seat_number: orderSeat.seat?.seat_number },
+        status: "issued",
       });
+
+      ticketIndex++;
     }
 
-    // =============================================
-    // 7. CREAR REGISTRO DE PAGO (simulado)
-    // =============================================
+    const capturedStatus = await StatusGeneral.findOne({
+      where: { dominio: "payment", descripcion: "captured" },
+      transaction,
+    });
+
     const payment = await Payment.create(
       {
         order_id: order.id,
@@ -443,42 +363,38 @@ const confirmOrder = async (orderId, userId) => {
       { transaction }
     );
 
-    // =============================================
-    // 8. TODO: RABBITMQ - Consumir mensaje de CARRITO_QUEUE
-    // =============================================
-    /*
-    // Este endpoint debería ser disparado por el consumer de RabbitMQ
-    // que escucha CARRITO_QUEUE y procesa pagos
-    
-    await acknowledgeMessage("CARRITO_QUEUE", orderId);
-    console.log("✅ Mensaje consumido de CARRITO_QUEUE para order:", orderId);
-    
-    // Publicar evento de PAGO_COMPLETADO
-    const paymentCompleteMessage = {
-      action: "PAYMENT_COMPLETED",
-      orderId: order.id,
-      userId: userId,
-      concertId: order.concert_id,
-      total: order.total,
-      ticketsGenerated: tickets.length,
-      ticketCodes: tickets.map(t => t.code),
-      timestamp: new Date().toISOString(),
-    };
-    
-    await publishToQueue("NOTIFICATIONS_QUEUE", paymentCompleteMessage);
-    console.log("📨 Mensaje publicado en NOTIFICATIONS_QUEUE:", paymentCompleteMessage);
-    */
-
     await transaction.commit();
 
-    // =============================================
-    // 9. RETORNAR RESPUESTA COMPLETA
-    // =============================================
+    try {
+      console.log('🗑️ [RabbitMQ] Liberando asientos de CARRITO_QUEUE...');
+      const removeResult = await removeSeatsFromQueue('CARRITO_QUEUE', seatIds, orderId);
+      console.log(`✅ [RabbitMQ] ${removeResult.removed} órdenes liberadas de CARRITO_QUEUE`);
+    } catch (error) {
+      console.error('⚠️ [RabbitMQ] Error liberando de CARRITO_QUEUE:', error);
+    }
+
+    try {
+      const paymentCompleteMessage = {
+        action: "PAYMENT_COMPLETED",
+        orderId: order.id,
+        userId: userId,
+        concertId: order.concert_id,
+        total: order.total,
+        ticketsGenerated: tickets.length,
+        ticketCodes: tickets.map(t => t.code),
+        timestamp: new Date().toISOString(),
+      };
+      await publishToQueue('NOTIFICATIONS_QUEUE', paymentCompleteMessage);
+      console.log('📨 [RabbitMQ] Notificación de pago publicada');
+    } catch (error) {
+      console.error('⚠️ [RabbitMQ] Error publicando notificación:', error);
+    }
+
     return {
-      message: "¡Pago confirmado! Tickets generados exitosamente",
+      message: "¡Pago confirmado! Tus tickets han sido generados.",
       order: {
         id: order.id,
-        status: "confirmed",
+        status: { descripcion: confirmedStatus.descripcion },
         total: order.total,
       },
       tickets,
@@ -491,9 +407,10 @@ const confirmOrder = async (orderId, userId) => {
     };
   } catch (error) {
     await transaction.rollback();
-    throw new Error("Error al confirmar orden: " + error.message);
+    throw error;
   }
-};
+}
+
 
 /**
  * Obtener orden por ID

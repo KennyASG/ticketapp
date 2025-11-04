@@ -568,7 +568,7 @@ Content-Type: application/json
 5. Crea `reservation_seats` para cada asiento
 6. Actualiza `concert_seats` status → "reserved"
 7. Reduce `available` del ticket type
-8. **TODO**: Publica mensaje en RabbitMQ (RESERVA_QUEUE)
+8. **TODO**: Publica mensaje en RabbitMQ (reserva)
 
 **Verificación:**
 ```sql
@@ -669,7 +669,7 @@ Content-Type: application/json
 4. Crea orden con status "pending"
 5. Crea `order_items` con los detalles
 6. Copia `reservation_seats` → `order_seats`
-7. **TODO**: Publica mensaje en RabbitMQ (CARRITO_QUEUE)
+7. **TODO**: Publica mensaje en RabbitMQ (carrito)
 
 **Verificación:**
 ```sql
@@ -738,7 +738,7 @@ Authorization: Bearer {{auth_token}}
 8. Crea registro de pago simulado en `payments`
    - Provider: "mock"
    - Status: "captured"
-9. **TODO**: Consume mensaje de RabbitMQ (CARRITO_QUEUE)
+9. **TODO**: Consume mensaje de RabbitMQ (carrito)
 10. **Commit transacción**
 
 **Verificación:**

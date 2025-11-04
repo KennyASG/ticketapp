@@ -11,6 +11,8 @@ const {
   sequelize,
 } = require("../models");  // ← Importar desde index.js
 const { Op } = require("sequelize");
+const { publishToQueue } = require('../workers/rabbitClient');
+const { checkSeatsInQueue } = require('../utils/queueHelpers');
 
 /**
  * Obtener tipos de tickets de un concierto
@@ -210,33 +212,22 @@ const validateSeatAvailability = async (concertId, seatIds, userId, transaction)
 /**
  * NUEVA VERSIÓN: Crear reserva con asientos específicos
  */
-const createReservation = async (userId, data) => {
+const createReservation = async (userId, { concert_id, ticket_type_id, quantity }) => {
   const transaction = await sequelize.transaction();
-  
+
   try {
-    const { concert_id, ticket_type_id, quantity } = data;
-
-    if (!concert_id || !ticket_type_id || !quantity || quantity <= 0 || quantity > 5) {
-      throw new Error("Datos de reserva inválidos");
-    }
-
     // =============================================
-    // 1. VALIDAR LÍMITE DE 5 ASIENTOS POR USUARIO
+    // 1. VALIDAR QUE EL USUARIO NO TENGA MÁS DE 5 ASIENTOS RESERVADOS
     // =============================================
     const activeStatus = await StatusGeneral.findOne({
       where: { dominio: "reservation", descripcion: "held" },
       transaction,
     });
 
-    const convertedStatus = await StatusGeneral.findOne({
-      where: { dominio: "reservation", descripcion: "confirmed" },
-      transaction,
-    });
-
-    const activeReservations = await Reservation.findAll({
+    const existingReservations = await Reservation.findAll({
       where: {
         user_id: userId,
-        status_id: [activeStatus.id, convertedStatus.id],
+        status_id: activeStatus.id,
       },
       include: [
         {
@@ -247,100 +238,109 @@ const createReservation = async (userId, data) => {
       transaction,
     });
 
-    const totalSeatsReserved = activeReservations.reduce(
-      (sum, reservation) => sum + (reservation.reservation_seats?.length || 0),
+    const totalReservedSeats = existingReservations.reduce(
+      (sum, res) => sum + res.reservation_seats.length,
       0
     );
 
-    if (totalSeatsReserved + quantity > 5) {
+    if (totalReservedSeats + quantity > 5) {
       throw new Error(
-        `Límite excedido. Tienes ${totalSeatsReserved} asientos reservados. Máximo: 5 por usuario.`
+        `No puedes reservar más de 5 asientos en total. Actualmente tienes ${totalReservedSeats} reservados.`
       );
     }
 
     // =============================================
-    // 2. VERIFICAR TIPO DE TICKET Y SECCIÓN
+    // 2. VALIDAR DISPONIBILIDAD DEL TICKET TYPE
     // =============================================
     const ticketType = await TicketType.findOne({
-      where :{
-        id: ticket_type_id,
-        concert_id
-      }
-    }, { transaction });
+      where: { id: ticket_type_id, concert_id },
+      transaction,
+    });
+
     if (!ticketType) {
-      throw new Error("Tipo de ticket no encontrado o no asignado a este concierto");
+      throw new Error("Tipo de ticket no encontrado");
     }
 
-    if (!ticketType.section_id) {
-      throw new Error("Este tipo de ticket no tiene sección asignada. Usa el flujo antiguo.");
+    if (ticketType.available < quantity) {
+      throw new Error(
+        `Solo hay ${ticketType.available} tickets disponibles de este tipo`
+      );
     }
 
     // =============================================
-    // 3. OBTENER ASIENTOS DISPONIBLES
+    // 3. OBTENER CONCIERTO
+    // =============================================
+    const concert = await Concert.findByPk(concert_id, { transaction });
+    if (!concert) {
+      throw new Error("Concierto no encontrado");
+    }
+
+    // =============================================
+    // 4. BUSCAR ASIENTOS DISPONIBLES EN LA SECCIÓN
     // =============================================
     const availableStatus = await StatusGeneral.findOne({
       where: { dominio: "seat", descripcion: "available" },
       transaction,
     });
 
-    const inCartStatus = await StatusGeneral.findOne({
-      where: { dominio: "seat", descripcion: "in_cart" },
-      transaction,
-    });
-
-    // Buscar asientos disponibles O en carrito (permitimos reservar si alguien más los tiene en carrito)
-    const candidateSeats = await ConcertSeat.findAll({
+    // ✅ CORREGIDO: Filtrar por section_id a través de la relación con seats
+    const availableSeats = await ConcertSeat.findAll({
       where: {
         concert_id,
-        status_id: [availableStatus.id, inCartStatus.id],
+        status_id: availableStatus.id,
       },
       include: [
         {
           model: Seat,
           as: "seat",
-          where: { section_id: ticketType.section_id },
-          required: true,
+          where: {
+            section_id: ticketType.section_id  // ✅ Filtrar por sección aquí
+          },
+          attributes: ["id", "seat_number", "section_id"],
         },
       ],
-      limit: quantity * 2, // Traer más de los necesarios por si algunos están bloqueados
+      limit: quantity,
       transaction,
     });
 
-    if (candidateSeats.length === 0) {
-      throw new Error("No hay asientos disponibles en esta sección");
-    }
-
-    // Extraer IDs de los asientos candidatos
-    const candidateSeatIds = candidateSeats.map((cs) => cs.seat_id);
-
-    // =============================================
-    // 4. VALIDAR DISPONIBILIDAD CON MATRIZ
-    // =============================================
-    const validation = await validateSeatAvailability(
-      concert_id,
-      candidateSeatIds,
-      userId,
-      transaction
-    );
-
-    if (validation.blocked.length > 0) {
-      console.log("Algunos asientos bloqueados:", validation.blocked);
-    }
-
-    if (validation.available.length < quantity) {
+    if (availableSeats.length < quantity) {
       throw new Error(
-        `Solo hay ${validation.available.length} asientos disponibles. Solicitaste ${quantity}.`
+        `Solo hay ${availableSeats.length} asientos disponibles en esta sección. Solicitaste ${quantity}.`
       );
     }
 
-    // Tomar solo los asientos que necesitamos
-    const seatsToReserve = validation.available.slice(0, quantity);
+    // Preparar datos de asientos
+    const seatsToReserve = availableSeats.map(cs => ({
+      seat_id: cs.seat.id,
+      concert_seat_id: cs.id,
+      seat_number: cs.seat.seat_number,
+      section_id: cs.seat.section_id
+    }));
+
+    const seatIds = seatsToReserve.map(s => s.seat_id);
+
+    // =============================================
+    // 🆕 VALIDAR COLAS ANTES DE RESERVAR
+    // =============================================
+    console.log('🔍 [RabbitMQ] Verificando disponibilidad en colas...');
+    
+    const queueStatus = await checkSeatsInQueue('reserva', seatIds);
+    
+    if (!queueStatus.canProceed) {
+      await transaction.rollback();
+      throw new Error(
+        `Los siguientes asientos ya están siendo reservados: ${queueStatus.inQueue.join(', ')}. ` +
+        `Por favor, selecciona otros asientos.`
+      );
+    }
+    
+    console.log('✅ [RabbitMQ] Asientos disponibles para reservar');
 
     // =============================================
     // 5. CREAR RESERVA
     // =============================================
     const expiresAt = new Date();
-    expiresAt.setMinutes(expiresAt.getMinutes() + 5); // 5 minutos para RabbitMQ
+    expiresAt.setMinutes(expiresAt.getMinutes() + 5);
 
     const reservation = await Reservation.create(
       {
@@ -353,7 +353,7 @@ const createReservation = async (userId, data) => {
     );
 
     // =============================================
-    // 6. CREAR RESERVATION_SEATS
+    // 6. CREAR RESERVATION_SEATS Y ACTUALIZAR STATUS
     // =============================================
     const reservedStatus = await StatusGeneral.findOne({
       where: { dominio: "seat", descripcion: "reserved" },
@@ -382,72 +382,65 @@ const createReservation = async (userId, data) => {
     }
 
     // =============================================
-    // 7. REDUCIR DISPONIBILIDAD DEL TICKET TYPE (OPCIONAL - depende de tu lógica)
+    // 7. REDUCIR DISPONIBILIDAD DEL TICKET TYPE
     // =============================================
     await ticketType.decrement("available", {
       by: quantity,
       transaction,
     });
 
-    // =============================================
-    // 8. TODO: PUBLICAR EN RABBITMQ (cola RESERVA)
-    // =============================================
-    // const rabbitMQMessage = {
-    //   reservationId: reservation.id,
-    //   userId: userId,
-    //   concertId: concert_id,
-    //   seatIds: seatsToReserve.map(s => s.seat_id),
-    //   concertSeatIds: seatsToReserve.map(s => s.concert_seat_id),
-    //   sectionId: ticketType.section_id,
-    //   timestamp: new Date().toISOString(),
-    // };
-    // await publishToQueue('RESERVA_QUEUE', rabbitMQMessage);
-
     await transaction.commit();
 
     // =============================================
-    // 9. RETORNAR RESPUESTA
+    // 🆕 PUBLICAR EN RABBITMQ DESPUÉS DE COMMIT
     // =============================================
-    const createdReservation = await Reservation.findByPk(reservation.id, {
-      include: [
-        {
-          model: Concert,
-          as: "concert",
-          attributes: ["id", "title", "date"],
-        },
-        {
-          model: StatusGeneral,
-          as: "status",
-          attributes: ["descripcion"],
-        },
-        {
-          model: ReservationSeat,
-          as: "reservation_seats",
-          include: [
-            {
-              model: Seat,
-              as: "seat",
-              attributes: ["id", "seat_number", "section_id"],
-            },
-          ],
-        },
-      ],
-    });
+    try {
+      const reservationMessage = {
+        action: "RESERVATION_CREATED",
+        reservationId: reservation.id,
+        userId: userId,
+        concertId: concert_id,
+        ticketTypeId: ticket_type_id,
+        seatIds: seatIds,
+        concertSeatIds: seatsToReserve.map(s => s.concert_seat_id),
+        quantity: quantity,
+        expiresAt: expiresAt.toISOString(),
+        timestamp: new Date().toISOString(),
+      };
 
+      await publishToQueue('reserva', reservationMessage);
+      console.log('✅ [RabbitMQ] Reserva publicada en reserva');
+    } catch (error) {
+      console.error('⚠️ [RabbitMQ] Error publicando reserva:', error);
+      // NO fallar el request si RabbitMQ falla
+    }
+
+    // =============================================
+    // 8. RETORNAR RESPUESTA
+    // =============================================
     return {
-      reservation: createdReservation,
-      ticket_type: ticketType,
-      quantity,
-      seats_reserved: seatsToReserve.map((s) => s.seat_number),
-      expires_at: expiresAt,
-      warnings: validation.warnings,
-      message: `Reserva creada exitosamente. Tienes 5 minutos para crear la orden. Asientos reservados: ${seatsToReserve.map(s => s.seat_number).join(", ")}`,
+      message: `Reserva creada exitosamente. Expira en 5 minutos.`,
+      reservation: {
+        id: reservation.id,
+        user_id: userId,
+        concert_id,
+        status_id: activeStatus.id,
+        expires_at: expiresAt,
+      },
+      quantity: seatsToReserve.length,
+      seats: seatsToReserve.map((s) => ({
+        seat_id: s.seat_id,
+        seat_number: s.seat_number,
+      })),
     };
   } catch (error) {
     await transaction.rollback();
-    throw new Error("Error al crear reserva: " + error.message);
+    throw error;
   }
-};
+}
+
+
+
 
 /**
  * Obtener reservas del usuario
