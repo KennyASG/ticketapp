@@ -10,8 +10,29 @@ const {
   sequelize 
 } = require("../models");
 const { Op } = require("sequelize");
+const redisClient = require("../utils/redis.config");
 
 const CONCERT_DURATION_HOURS = 4;
+
+// Constantes para el caché
+const CACHE_KEY_PREFIX = 'concerts:list';
+const CACHE_TTL = 300; // 5 minutos
+
+/**
+ * Invalidar caché de conciertos
+ */
+const invalidateConcertsCache = async () => {
+  try {
+    const keys = await redisClient.keys(`${CACHE_KEY_PREFIX}:*`);
+    
+    if (keys.length > 0) {
+      await redisClient.del(keys);
+      console.log(`✓ Caché de conciertos invalidado (${keys.length} keys eliminadas)`);
+    }
+  } catch (error) {
+    console.error('Error al invalidar caché de conciertos:', error);
+  }
+};
 
 /**
  * Validar que no haya traslape de horarios
@@ -70,40 +91,100 @@ const validateNoOverlap = async (venueId, date, excludeConcertId = null, transac
 };
 
 /**
- * Obtener todos los conciertos
+ * Obtener todos los conciertos (CON CACHÉ)
  */
 const getAllConcerts = async (options = {}) => {
   const { page = 1, limit = 20 } = options;
   const offset = (page - 1) * limit;
 
-  const { count, rows: concerts } = await Concert.findAndCountAll({
-    include: [
-      {
-        model: StatusGeneral,
-        as: "status",
-        attributes: ["id", "descripcion"],
-      },
-      {
-        model: Venue,
-        as: "venues",
-        attributes: ["id", "name", "city", "country"],
-        through: { attributes: [] },
-      },
-    ],
-    limit,
-    offset,
-    order: [["date", "DESC"]],
-  });
+  // Generar key única basada en los parámetros
+  const cacheKey = `${CACHE_KEY_PREFIX}:page${page}:limit${limit}`;
 
-  return {
-    concerts,
-    pagination: {
-      total: count,
-      page,
+  try {
+    // 1. Intentar obtener de Redis
+    const cached = await redisClient.get(cacheKey);
+    
+    if (cached) {
+      console.log(`✓ Cache HIT: ${cacheKey}`);
+      return JSON.parse(cached);
+    }
+    
+    console.log(`✗ Cache MISS: ${cacheKey} - consultando BD...`);
+
+    // 2. Consultar base de datos
+    const { count, rows: concerts } = await Concert.findAndCountAll({
+      include: [
+        {
+          model: StatusGeneral,
+          as: "status",
+          attributes: ["id", "descripcion"],
+        },
+        {
+          model: Venue,
+          as: "venues",
+          attributes: ["id", "name", "city", "country"],
+          through: { attributes: [] },
+        },
+      ],
       limit,
-      totalPages: Math.ceil(count / limit),
-    },
-  };
+      offset,
+      order: [["date", "DESC"]],
+    });
+
+    const result = {
+      concerts,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    };
+
+    // 3. Guardar en Redis
+    await redisClient.setEx(
+      cacheKey,
+      CACHE_TTL,
+      JSON.stringify(result)
+    );
+    
+    console.log(`✓ Conciertos guardados en caché: ${cacheKey}`);
+
+    return result;
+
+  } catch (error) {
+    console.error('Error en caché de conciertos:', error);
+    
+    // Fallback: consultar BD directamente si Redis falla
+    const { count, rows: concerts } = await Concert.findAndCountAll({
+      include: [
+        {
+          model: StatusGeneral,
+          as: "status",
+          attributes: ["id", "descripcion"],
+        },
+        {
+          model: Venue,
+          as: "venues",
+          attributes: ["id", "name", "city", "country"],
+          through: { attributes: [] },
+        },
+      ],
+      limit,
+      offset,
+      order: [["date", "DESC"]],
+    });
+
+    return {
+      concerts,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    };
+  }
 };
 
 /**
@@ -146,7 +227,7 @@ const getConcertById = async (id) => {
 };
 
 /**
- * Crear un nuevo concierto
+ * Crear un nuevo concierto (INVALIDA CACHÉ)
  */
 const createConcert = async (data) => {
   const transaction = await sequelize.transaction();
@@ -214,6 +295,9 @@ const createConcert = async (data) => {
 
     await transaction.commit();
 
+    // Invalidar caché después de crear
+    await invalidateConcertsCache();
+
     const createdConcert = await Concert.findByPk(newConcert.id, {
       include: [
         { model: StatusGeneral, as: "status" },
@@ -229,7 +313,7 @@ const createConcert = async (data) => {
 };
 
 /**
- * Actualizar un concierto
+ * Actualizar un concierto (INVALIDA CACHÉ)
  */
 const updateConcert = async (id, data) => {
   const transaction = await sequelize.transaction();
@@ -299,6 +383,9 @@ const updateConcert = async (id, data) => {
 
     await transaction.commit();
 
+    // Invalidar caché después de actualizar
+    await invalidateConcertsCache();
+
     const updatedConcert = await Concert.findByPk(id, {
       include: [
         { model: StatusGeneral, as: "status" },
@@ -314,7 +401,7 @@ const updateConcert = async (id, data) => {
 };
 
 /**
- * Eliminar un concierto
+ * Eliminar un concierto (INVALIDA CACHÉ)
  */
 const deleteConcert = async (id) => {
   const transaction = await sequelize.transaction();
@@ -327,6 +414,9 @@ const deleteConcert = async (id) => {
 
     await concert.destroy({ transaction });
     await transaction.commit();
+
+    // Invalidar caché después de eliminar
+    await invalidateConcertsCache();
 
     return { message: "Concierto eliminado correctamente" };
   } catch (error) {
