@@ -1,5 +1,5 @@
 const jwt = require("jsonwebtoken");
-const SECRET = process.env.JWT_SECRET || "changeme";
+const SECRET = process.env.JWT_SECRET || "supersecret";
 
 function generateToken(payload) {
   return jwt.sign(payload, SECRET, { expiresIn: "1h" });
