@@ -4,7 +4,6 @@
 // Funciones para validar y gestionar asientos en colas
 // Copiar en: shared/queueHelpers.js o en cada servicio
 
-const { useLayoutEffect } = require('react');
 const { consumeBatchFromQueue, publishToQueue } = require('../workers/rabbitClient');
 
 // ================================================
