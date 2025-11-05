@@ -1,38 +1,117 @@
 const { Venue, VenueSection, Seat, sequelize } = require("../models");
 const { Op } = require("sequelize");
+const redisClient = require("../utils/redis.config");
+
+// Constantes para el caché
+const CACHE_KEY_PREFIX = 'venues:list';
+const CACHE_TTL = 300; // 5 minutos
 
 /**
- * Obtener todos los venues
+ * Invalidar caché de venues
+ */
+const invalidateVenuesCache = async () => {
+  try {
+    // Obtener todas las keys que coincidan con el patrón
+    const keys = await redisClient.keys(`${CACHE_KEY_PREFIX}:*`);
+    
+    if (keys.length > 0) {
+      await redisClient.del(keys);
+      console.log(`✓ Caché de venues invalidado (${keys.length} keys eliminadas)`);
+    }
+  } catch (error) {
+    console.error('Error al invalidar caché de venues:', error);
+  }
+};
+
+/**
+ * Obtener todos los venues (CON CACHÉ)
  */
 const getAllVenues = async (options = {}) => {
   const { page = 1, limit = 20, includeSections = false } = options;
   const offset = (page - 1) * limit;
 
-  const includes = [];
-  if (includeSections) {
-    includes.push({
-      model: VenueSection,
-      as: "sections",
-      attributes: ["id", "name", "capacity"],
-    });
-  }
+  // Generar key única basada en los parámetros
+  const cacheKey = `${CACHE_KEY_PREFIX}:page${page}:limit${limit}:sections${includeSections}`;
 
-  const { count, rows: venues } = await Venue.findAndCountAll({
-    include: includes,
-    limit,
-    offset,
-    order: [["created_at", "DESC"]],
-  });
+  try {
+    // 1. Intentar obtener de Redis
+    const cached = await redisClient.get(cacheKey);
+    
+    if (cached) {
+      console.log(`✓ Cache HIT: ${cacheKey}`);
+      return JSON.parse(cached);
+    }
+    
+    console.log(`✗ Cache MISS: ${cacheKey} - consultando BD...`);
 
-  return {
-    venues,
-    pagination: {
-      total: count,
-      page,
+    // 2. Consultar base de datos
+    const includes = [];
+    if (includeSections) {
+      includes.push({
+        model: VenueSection,
+        as: "sections",
+        attributes: ["id", "name", "capacity"],
+      });
+    }
+
+    const { count, rows: venues } = await Venue.findAndCountAll({
+      include: includes,
       limit,
-      totalPages: Math.ceil(count / limit),
-    },
-  };
+      offset,
+      order: [["created_at", "DESC"]],
+    });
+
+    const result = {
+      venues,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    };
+
+    // 3. Guardar en Redis
+    await redisClient.setEx(
+      cacheKey,
+      CACHE_TTL,
+      JSON.stringify(result)
+    );
+    
+    console.log(`✓ Venues guardados en caché: ${cacheKey}`);
+
+    return result;
+
+  } catch (error) {
+    console.error('Error en caché de venues:', error);
+    
+    // Fallback: consultar BD directamente si Redis falla
+    const includes = [];
+    if (includeSections) {
+      includes.push({
+        model: VenueSection,
+        as: "sections",
+        attributes: ["id", "name", "capacity"],
+      });
+    }
+
+    const { count, rows: venues } = await Venue.findAndCountAll({
+      include: includes,
+      limit,
+      offset,
+      order: [["created_at", "DESC"]],
+    });
+
+    return {
+      venues,
+      pagination: {
+        total: count,
+        page,
+        limit,
+        totalPages: Math.ceil(count / limit),
+      },
+    };
+  }
 };
 
 /**
@@ -69,7 +148,7 @@ const getVenueById = async (id, includeDetails = false) => {
 };
 
 /**
- * Crear nuevo venue
+ * Crear nuevo venue (INVALIDA CACHÉ)
  */
 const createVenue = async (data) => {
   try {
@@ -86,6 +165,9 @@ const createVenue = async (data) => {
       country,
     });
 
+    // Invalidar caché después de crear
+    await invalidateVenuesCache();
+
     return newVenue;
   } catch (error) {
     throw new Error("Error al crear venue: " + error.message);
@@ -93,7 +175,7 @@ const createVenue = async (data) => {
 };
 
 /**
- * Actualizar venue
+ * Actualizar venue (INVALIDA CACHÉ)
  */
 const updateVenue = async (id, data) => {
   try {
@@ -104,6 +186,10 @@ const updateVenue = async (id, data) => {
     }
 
     await venue.update(data);
+    
+    // Invalidar caché después de actualizar
+    await invalidateVenuesCache();
+    
     return venue;
   } catch (error) {
     throw new Error("Error al actualizar venue: " + error.message);
@@ -111,7 +197,7 @@ const updateVenue = async (id, data) => {
 };
 
 /**
- * Eliminar venue
+ * Eliminar venue (INVALIDA CACHÉ)
  */
 const deleteVenue = async (id) => {
   try {
@@ -122,6 +208,10 @@ const deleteVenue = async (id) => {
     }
 
     await venue.destroy();
+    
+    // Invalidar caché después de eliminar
+    await invalidateVenuesCache();
+    
     return { message: "Venue eliminado correctamente" };
   } catch (error) {
     throw new Error("Error al eliminar venue: " + error.message);
